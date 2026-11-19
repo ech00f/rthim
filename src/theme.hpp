@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-// Три «мира» меню. Всё, что между ними, получается интерполяцией по курсору.
+// Три «мира» меню. Всё, что между ними, получается интерполяцией стиля.
 struct Style {
     const char *name;
     Color bgTop, bgBottom;
@@ -18,23 +18,29 @@ struct Style {
     float glow;
     float hardShadow;
     float softShadow;
+    float labelSpacing; // трекинг подписи кнопки
+    float titleSpacing; // трекинг заголовка
+    float bob;          // амплитуда «дыхания» букв заголовка
 };
 
 inline const Style kStyles[3] = {
     // NEON — тёмный неон, параллелограммы, свечение.
-    {"NEON", hex(0x070310), hex(0x1A0630), hex(0xFF2E88), hex(0x3DF2FF),
+    {"NEON", hex(0x05010B), hex(0x1B0838), hex(0xFF2E88), hex(0x3DF2FF),
      hex(0xF4EEFF), hex(0x9C86C8), hex(0x150B28, 0.78f), hex(0xFF2E88, 0.85f),
-     hex(0xEFE6FF), hex(0x0B0616), 0.10f, 18.f, 1.5f, 1.0f, 0.f, 0.f},
+     hex(0xEFE6FF), hex(0x0B0616), 0.10f, 18.f, 1.5f, 1.f, 0.f, 0.f,
+     4.5f, 16.f, 0.f},
 
     // BLOOM — пастель, мягкие пилюли, тёплые пятна.
-    {"BLOOM", hex(0xFFF0EC), hex(0xFFCFE2), hex(0xEE6D9A), hex(0xB79BF0),
+    {"BLOOM", hex(0xFFF2EE), hex(0xFFCBDD), hex(0xEE6D9A), hex(0xB79BF0),
      hex(0x3B2138), hex(0x9B7E92), hex(0xFFFFFF, 0.92f), hex(0xFFFFFF, 0.f),
-     hex(0xB84E7B), hex(0xFFFFFF), 1.f, 0.f, 0.f, 0.35f, 0.f, 9.f},
+     hex(0xB84E7B), hex(0xFFFFFF), 1.f, 0.f, 0.f, 0.35f, 0.f, 9.f,
+     2.4f, 10.f, 2.6f},
 
     // INK — бумага, брутализм, жёсткая тень, острые углы.
-    {"INK", hex(0xF5F2EA), hex(0xE7E2D6), hex(0x15130F), hex(0xE2452B),
+    {"INK", hex(0xF6F3EB), hex(0xE9E3D5), hex(0x15130F), hex(0xE2452B),
      hex(0x15130F), hex(0x6E6860), hex(0xFBFAF6), hex(0x15130F),
-     hex(0x15130F), hex(0xF5F2EA), 0.f, 0.f, 3.f, 0.f, 9.f, 0.f},
+     hex(0x15130F), hex(0xF5F2EA), 0.f, 0.f, 3.f, 0.f, 9.f, 0.f,
+     1.2f, 8.f, 0.5f},
 };
 
 inline float smoothstep01(float x) {
@@ -45,6 +51,7 @@ inline float smoothstep01(float x) {
 // Веса для фоновых слоёв: рядом со «своим» стилем всё почти чисто,
 // в середине — плавная склейка. Так меньше «серой каши» в переходе.
 inline void styleWeights(float t, float w[3]) {
+    t = std::clamp(t, 0.f, 2.f);
     float raw[3] = {std::max(0.f, 1.f - t),
                     std::max(0.f, 1.f - std::fabs(t - 1.f)),
                     std::max(0.f, t - 1.f)};
@@ -87,6 +94,9 @@ inline Style mixStyle(const Style &a, const Style &b, float fUi, float fBg) {
     s.glow = std::lerp(a.glow, b.glow, fUi);
     s.hardShadow = std::lerp(a.hardShadow, b.hardShadow, fUi);
     s.softShadow = std::lerp(a.softShadow, b.softShadow, fUi);
+    s.labelSpacing = std::lerp(a.labelSpacing, b.labelSpacing, fUi);
+    s.titleSpacing = std::lerp(a.titleSpacing, b.titleSpacing, fUi);
+    s.bob = std::lerp(a.bob, b.bob, fUi);
     return s;
 }
 
@@ -95,10 +105,10 @@ inline Style mixStyle(const Style &a, const Style &b, float fUi, float fBg) {
 // белый или почти чёрный.
 inline void guardContrast(Style &s) {
     float bg = 0.5f * (luminance(s.bgTop) + luminance(s.bgBottom));
-    if (std::fabs(luminance(s.text) - bg) < 0.30f) {
+    if (std::fabs(luminance(s.text) - bg) < 0.33f) {
         s.text = (bg < 0.5f) ? hex(0xFFFFFF) : hex(0x141014);
     }
-    if (std::fabs(luminance(s.btnText) - bg) < 0.25f) {
+    if (std::fabs(luminance(s.btnText) - bg) < 0.30f) {
         s.btnText = (bg < 0.5f) ? hex(0xFFFFFF) : hex(0x141014);
     }
     if (std::fabs(luminance(s.dim) - bg) < 0.16f) {
@@ -123,8 +133,8 @@ inline Style blendStyle(float t) {
     float dusk = 4.f * w[0] * w[1];
     if (dusk > 0.001f) {
         Color deep = hex(0x0A0410);
-        s.bgTop = mix(s.bgTop, deep, 0.30f * dusk);
-        s.bgBottom = mix(s.bgBottom, deep, 0.30f * dusk);
+        s.bgTop = mix(s.bgTop, deep, 0.40f * dusk);
+        s.bgBottom = mix(s.bgBottom, deep, 0.40f * dusk);
     }
 
     guardContrast(s);

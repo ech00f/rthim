@@ -220,6 +220,62 @@ void Gfx::circle(float cx, float cy, float r, Color c, int segments) {
     }
 }
 
+void Gfx::polygon(const std::vector<Pt> &pts, Color c) {
+    if (c.a <= 0.002f || pts.size() < 3) {
+        return;
+    }
+    Pt center{0.f, 0.f};
+    for (const Pt &p : pts) {
+        center.x += p.x;
+        center.y += p.y;
+    }
+    center.x /= float(pts.size());
+    center.y /= float(pts.size());
+    Pt sc = toScreen(center.x, center.y);
+    for (size_t i = 0; i < pts.size(); ++i) {
+        size_t j = (i + 1) % pts.size();
+        tri(sc, toScreen(pts[i].x, pts[i].y), toScreen(pts[j].x, pts[j].y), c);
+    }
+}
+
+void Gfx::ellipse(float cx, float cy, float rx, float ry, float rot, Color c,
+                  int segments) {
+    if (c.a <= 0.002f || rx <= 0.f || ry <= 0.f) {
+        return;
+    }
+    std::vector<Pt> pts;
+    pts.reserve(size_t(segments));
+    float cr = std::cos(rot), sr = std::sin(rot);
+    for (int i = 0; i < segments; ++i) {
+        float a = kPi * 2.f * float(i) / float(segments);
+        float x = std::cos(a) * rx;
+        float y = std::sin(a) * ry;
+        pts.push_back({cx + x * cr - y * sr, cy + x * sr + y * cr});
+    }
+    polygon(pts, c);
+}
+
+void Gfx::arc(float cx, float cy, float r, float thickness, float a0, float a1,
+              Color c, int segments) {
+    if (c.a <= 0.002f || r <= 0.f) {
+        return;
+    }
+    if (a1 < a0) {
+        std::swap(a0, a1);
+    }
+    float ri = std::max(0.f, r - thickness);
+    for (int i = 0; i < segments; ++i) {
+        float b0 = a0 + (a1 - a0) * float(i) / float(segments);
+        float b1 = a0 + (a1 - a0) * float(i + 1) / float(segments);
+        Pt o0 = toScreen(cx + std::cos(b0) * r, cy + std::sin(b0) * r);
+        Pt o1 = toScreen(cx + std::cos(b1) * r, cy + std::sin(b1) * r);
+        Pt i0 = toScreen(cx + std::cos(b0) * ri, cy + std::sin(b0) * ri);
+        Pt i1 = toScreen(cx + std::cos(b1) * ri, cy + std::sin(b1) * ri);
+        tri(o0, o1, i1, c);
+        tri(o0, i1, i0, c);
+    }
+}
+
 void Gfx::glowCircle(float cx, float cy, float r, Color c, float centerAlpha) {
     if (centerAlpha <= 0.002f || r <= 0.f) {
         return;
@@ -303,12 +359,9 @@ TTF_Font *Gfx::font(int size, bool medium) {
     return f;
 }
 
-const Gfx::TextTex &Gfx::glyphTex(Uint32 cp, int size, Color c, bool medium) {
-    char key[64];
-    std::snprintf(key, sizeof key, "%X|%d|%c|%02X%02X%02X%02X", cp, size,
-                  medium ? 'm' : 'r', int(clamp01(c.r) * 255.f),
-                  int(clamp01(c.g) * 255.f), int(clamp01(c.b) * 255.f),
-                  int(clamp01(c.a) * 255.f));
+const Gfx::TextTex &Gfx::glyphTex(Uint32 cp, int size, bool medium) {
+    char key[32];
+    std::snprintf(key, sizeof key, "%X|%d|%c", cp, size, medium ? 'm' : 'r');
     std::string k(key);
     auto it = glyphs.find(k);
     if (it != glyphs.end()) {
@@ -321,9 +374,11 @@ const Gfx::TextTex &Gfx::glyphTex(Uint32 cp, int size, Color c, bool medium) {
         return empty;
     }
 
-    SDL_Color sc{Uint8(clamp01(c.r) * 255.f), Uint8(clamp01(c.g) * 255.f),
-                 Uint8(clamp01(c.b) * 255.f), Uint8(clamp01(c.a) * 255.f)};
-    SDL_Surface *surf = TTF_RenderGlyph_Blended(f, cp, sc);
+    // Глифы кэшируются белыми: цвет и альфа применяются при отрисовке
+    // через модуляцию текстуры. Иначе анимация прозрачности плодила бы
+    // по новой текстуре на каждый кадр.
+    SDL_Color white{255, 255, 255, 255};
+    SDL_Surface *surf = TTF_RenderGlyph_Blended(f, cp, white);
     if (!surf) {
         return empty;
     }
@@ -398,10 +453,14 @@ void Gfx::text(const std::string &s, int size, Color c, float x, float y,
         int minx = 0, maxx = 0, miny = 0, maxy = 0, adv = 0;
         TTF_GetGlyphMetrics(f, cp, &minx, &maxx, &miny, &maxy, &adv);
         if (cp != ' ' && cp != '\t') {
-            const TextTex &tt = glyphTex(cp, size, c, medium);
+            const TextTex &tt = glyphTex(cp, size, medium);
             if (tt.tex) {
                 // SDL_ttf 3 отдаёт глиф уже внутри полной строки: он
                 // выровнен по baseline и включает боковые отступы.
+                SDL_SetTextureColorMod(tt.tex, Uint8(clamp01(c.r) * 255.f),
+                                       Uint8(clamp01(c.g) * 255.f),
+                                       Uint8(clamp01(c.b) * 255.f));
+                SDL_SetTextureAlphaMod(tt.tex, Uint8(clamp01(c.a) * 255.f));
                 SDL_FRect dst{ox + pen * scale, oy + y * scale,
                               tt.w * scale, tt.h * scale};
                 SDL_RenderTexture(ren, tt.tex, nullptr, &dst);

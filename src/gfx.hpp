@@ -56,9 +56,14 @@ public:
     void gradientRect(Rect r, Color top, Color bottom);
     void fillRect(Rect r, Color c);
     void fillRoundRect(Rect r, float radius, float shear, Color c);
+    void polygon(const std::vector<Pt> &pts, Color c);
     void circle(float cx, float cy, float r, Color c, int segments = 48);
+    void ellipse(float cx, float cy, float rx, float ry, float rot, Color c,
+                 int segments = 28);
     void glowCircle(float cx, float cy, float r, Color c, float centerAlpha);
     void ring(float cx, float cy, float r, float thickness, Color c);
+    void arc(float cx, float cy, float r, float thickness, float a0, float a1,
+             Color c, int segments = 36);
     void line(float x1, float y1, float x2, float y2, float thickness,
               Color c);
 
@@ -81,7 +86,7 @@ private:
     }
 
     TTF_Font *font(int size, bool medium);
-    const TextTex &glyphTex(Uint32 cp, int size, Color c, bool medium);
+    const TextTex &glyphTex(Uint32 cp, int size, bool medium);
 
     void tri(Pt a, Pt b, Pt c, Color col);
     void triC(Pt a, Color ca, Pt b, Color cb, Pt c, Color cc);

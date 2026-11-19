@@ -106,10 +106,12 @@ int main(int argc, char **argv) {
         } shots[] = {{150.f, 337.f}, {410.f, 415.f}, {640.f, 337.f},
                      {870.f, 493.f}, {1130.f, 337.f}};
         int idx = 0;
+        s.intro = 4.f;
+        s.time = 2.f;
         for (const auto &sh : shots) {
-            s.cursorX = sh.x;
-            s.cursorY = sh.y;
-            for (int k = 0; k < 60; ++k) {
+            s.rawX = sh.x;
+            s.rawY = sh.y;
+            for (int k = 0; k < 90; ++k) {
                 menu::update(s, 1.f / 60.f);
             }
 
@@ -136,15 +138,11 @@ int main(int argc, char **argv) {
     float mouseWX = 640.f, mouseWY = 360.f;
     Uint64 prev = SDL_GetTicks();
 
-    auto activate = [&]() {
-        s.press[s.selected] = 1.f;
-        if (s.selected == menu::buttonCount() - 1) {
+    auto activate = [&](int index) {
+        menu::activate(s, index);
+        if (index == menu::buttonCount() - 1) {
             running = false;
-            return;
         }
-        s.toastText = std::string(menu::label(s.selected)) +
-                      " — NOT WIRED UP YET";
-        s.toast = 1.6f;
     };
 
     while (running) {
@@ -165,7 +163,7 @@ int main(int argc, char **argv) {
                     s.selected = (s.selected + n - 1) % n;
                 } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER ||
                            k == SDLK_SPACE) {
-                    activate();
+                    activate(s.selected);
                 }
                 break;
             }
@@ -200,16 +198,16 @@ int main(int argc, char **argv) {
         g.begin(pw, ph, ww, wh);
 
         Pt m = g.windowToLogical(mouseWX, mouseWY);
-        s.cursorX = m.x;
-        s.cursorY = m.y;
+        s.rawX = m.x;
+        s.rawY = m.y;
 
         menu::update(s, dt);
 
         if (pendingClick) {
-            int hit = menu::hitTest(s.cursorX, s.cursorY);
+            int hit = menu::hitTest(s.rawX, s.rawY);
             if (hit >= 0) {
                 s.selected = hit;
-                activate();
+                activate(hit);
             }
             pendingClick = false;
         }
