@@ -10,7 +10,7 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     env:
-      SDL_PREFIX: ${{ runner.temp }}/sdl-prefix
+      SDL_PREFIX: ${{ github.workspace }}/.ci/sdl
 
     steps:
       - name: Checkout
@@ -27,7 +27,7 @@ jobs:
         id: cache-sdl
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/sdl-prefix
+          path: .ci/sdl
           key: sdl-${{ runner.os }}-3.4.18-3.2.2-1
 
       - name: Build SDL3
@@ -77,7 +77,7 @@ jobs:
 
       - name: Configure rthim
         env:
-          PKG_CONFIG_PATH: ${{ runner.temp }}/sdl-prefix/lib/pkgconfig
+          PKG_CONFIG_PATH: ${{ github.workspace }}/.ci/sdl/lib/pkgconfig
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build rthim
@@ -135,7 +135,7 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
           SDL_AUDIODRIVER: dummy
-          LD_LIBRARY_PATH: ${{ runner.temp }}/sdl-prefix/lib
+          LD_LIBRARY_PATH: ${{ github.workspace }}/.ci/sdl/lib
         run: |
           ./build/rthim --list
           ./build/rthim --selftest
