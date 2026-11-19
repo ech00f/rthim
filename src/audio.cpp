@@ -20,6 +20,9 @@ std::atomic<float> g_high{0.f};
 std::atomic<float> g_beatPhase{0.f};
 std::atomic<int> g_beatIndex{0};
 std::atomic<int> g_bpm{128};
+std::atomic<float> g_volume{0.9f};
+std::atomic<float> g_band[3] = {{1.f}, {1.f}, {1.f}};
+std::atomic<bool> g_restart{false};
 
 namespace {
 
@@ -81,7 +84,17 @@ struct Mixer {
     float lvlLow = 0.f, lvlMid = 0.f, lvlHigh = 0.f;
     float pulse = 0.f;
     float crackle = 0.f;
+    float volSm = 0.9f;
+    float bg[3] = {1.f, 1.f, 1.f};
     uint64_t counter = 0;
+
+    // Общий транспорт: все три лупа шагают по одной сетке, поэтому
+    // кроссфейд не превращается в ритмическую кашу.
+    int step = 0;
+    double stepTime = 0.0;
+    double stepDur = 15.0 / 128.0;
+    float lastBpm = 128.f;
+    float bpmSm = 128.f; // темп ползёт плавно, а не прыгает вместе с тембром
 
     void reset() {
         *this = Mixer{};
@@ -90,6 +103,8 @@ struct Mixer {
         lay[1].padFreq[0] = noteHz(53); // F3
         lay[1].padFreq[1] = noteHz(57); // A3
         lay[1].padFreq[2] = noteHz(60); // C4
+        step = 0;
+        stepTime = 0.0;
         for (int i = 0; i < 3; ++i) {
             trigger(i, 0);
         }
@@ -212,13 +227,6 @@ struct Mixer {
     // Возвращает семпл лупа; kickOut — огибающая бочки для пульса.
     float styleSample(int idx, float &kickOut, float noise) {
         Layer &v = lay[idx];
-        const double stepDur = 60.0 / double(kBpm[idx]) / 4.0;
-        v.stepTime += 1.0 / kRate;
-        if (v.stepTime >= stepDur) {
-            v.stepTime -= stepDur;
-            v.step = (v.step + 1) & 15;
-            trigger(idx, v.step);
-        }
 
         // бочка: синус с падением высоты + щелчок
         float kick = 0.f;
@@ -303,14 +311,17 @@ struct Mixer {
 
         switch (idx) {
         case 0:
-            return kick * 0.85f + snare * 0.35f + hat * 0.26f +
-                   bass * 0.55f + lead * 0.24f;
+            return (kick * 0.85f + bass * 0.55f) * bg[0] +
+                   (snare * 0.35f + lead * 0.24f) * bg[1] +
+                   hat * 0.26f * bg[2];
         case 1:
-            return kick * 0.55f + snare * 0.20f + hat * 0.10f +
-                   bass * 0.42f + lead * 0.30f + pad * 0.35f;
+            return (kick * 0.55f + bass * 0.42f) * bg[0] +
+                   (snare * 0.20f + lead * 0.30f + pad * 0.35f) * bg[1] +
+                   hat * 0.10f * bg[2];
         default:
-            return kick * 0.80f + snare * 0.48f + hat * 0.16f +
-                   bass * 0.50f + lead * 0.16f + pad * 0.42f;
+            return (kick * 0.80f + bass * 0.50f) * bg[0] +
+                   (snare * 0.48f + lead * 0.16f + pad * 0.42f) * bg[1] +
+                   hat * 0.16f * bg[2];
         }
     }
 
@@ -324,7 +335,42 @@ struct Mixer {
                 float target = (offWeights[0] >= 0.f)
                                    ? offWeights[k]
                                    : g_weights[k].load(std::memory_order_relaxed);
-                gain[k] += (target - gain[k]) * 0.0018f;
+                gain[k] += (target - gain[k]) * 0.0007f;
+            }
+
+            float bpmNow = 0.f;
+            for (int k = 0; k < 3; ++k) {
+                bpmNow += gain[k] * float(kBpm[k]);
+            }
+            if (bpmNow < 1.f) {
+                bpmNow = 128.f;
+            }
+            bpmSm += (bpmNow - bpmSm) * 0.00018f;
+            lastBpm = bpmSm;
+            stepDur = 15.0 / double(bpmSm);
+
+            if (g_restart.exchange(false, std::memory_order_relaxed)) {
+                step = 0;
+                stepTime = 0.0;
+                for (int k = 0; k < 3; ++k) {
+                    trigger(k, 0);
+                }
+            }
+            stepTime += 1.0 / kRate;
+            if (stepTime >= stepDur) {
+                stepTime -= stepDur;
+                step = (step + 1) & 15;
+                for (int k = 0; k < 3; ++k) {
+                    trigger(k, step);
+                }
+            }
+
+            float volTarget = g_volume.load(std::memory_order_relaxed);
+            volSm += (volTarget - volSm) * 0.002f;
+            for (int k = 0; k < 3; ++k) {
+                // Плавно, иначе мьют полосы щёлкает.
+                float target = g_band[k].load(std::memory_order_relaxed);
+                bg[k] += (target - bg[k]) * 0.002f;
             }
 
             float n = rng.noise();
@@ -348,7 +394,7 @@ struct Mixer {
                 crackle *= 0.986f;
             }
 
-            mix = std::tanh(mix * 1.15f) * 0.62f;
+            mix = std::tanh(mix * 1.15f) * 0.62f * volSm;
 
             // уровни для визуала
             lpLow += (mix - lpLow) * aLow;
@@ -379,19 +425,12 @@ struct Mixer {
         g_mid.store(clamp01(lvlMid * 2.4f), std::memory_order_relaxed);
         g_high.store(clamp01(lvlHigh * 8.f), std::memory_order_relaxed);
 
-        int best = 0;
-        for (int k = 1; k < 3; ++k) {
-            if (gain[k] > gain[best]) {
-                best = k;
-            }
-        }
-        const double stepDur = 60.0 / double(kBpm[best]) / 4.0;
-        double within = lay[best].stepTime / stepDur;
-        int beat = (lay[best].step >> 2) & 3;
-        float phase = float((lay[best].step & 3) + within) * 0.25f;
+        double within = (stepDur > 0.0) ? stepTime / stepDur : 0.0;
+        int beat = (step >> 2) & 3;
+        float phase = float((step & 3) + within) * 0.25f;
         g_beatPhase.store(phase, std::memory_order_relaxed);
         g_beatIndex.store(beat, std::memory_order_relaxed);
-        g_bpm.store(kBpm[best], std::memory_order_relaxed);
+        g_bpm.store(int(std::lround(lastBpm)), std::memory_order_relaxed);
     }
 };
 
@@ -463,6 +502,8 @@ bool init() {
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         return false;
     }
+    // Меньше буфер — меньше задержка между ударом и реакцией интерфейса.
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "512");
     SDL_AudioSpec spec{};
     spec.format = SDL_AUDIO_F32;
     spec.channels = 2;
@@ -497,6 +538,19 @@ void setWeights(float w0, float w1, float w2) {
     g_weights[2].store(std::max(0.f, w2), std::memory_order_relaxed);
 }
 
+void setVolume(float v) {
+    g_volume.store(std::clamp(v, 0.f, 1.f), std::memory_order_relaxed);
+}
+
+void setBandGain(int band, float gain) {
+    if (band < 0 || band > 2) {
+        return;
+    }
+    g_band[band].store(std::clamp(gain, 0.f, 1.f), std::memory_order_relaxed);
+}
+
+void restartBar() { g_restart.store(true, std::memory_order_relaxed); }
+
 Levels levels() {
     Levels l;
     l.pulse = g_pulse.load(std::memory_order_relaxed);
@@ -526,6 +580,8 @@ bool bounce(const char *dir, float seconds) {
         m.gain[0] = m.offWeights[0];
         m.gain[1] = m.offWeights[1];
         m.gain[2] = m.offWeights[2];
+        m.bpmSm = float(kBpm[idx]);
+        m.lastBpm = m.bpmSm;
         std::vector<float> pcm(size_t(frames) * 2);
         m.render(pcm.data(), frames);
 

@@ -15,6 +15,23 @@ constexpr float H = 720.f;
 constexpr int kCount = 4;
 constexpr float kPi = 3.14159265358979f;
 
+// Раскладка интерактивных зон (совпадает с отрисовкой колонок).
+constexpr float kEqX = 72.f;
+constexpr float kEqBase = 530.f;
+constexpr float kEqBarW = 20.f;
+constexpr float kEqGap = 12.f;
+constexpr float kEqMaxH = 200.f;
+constexpr int kEqBars = 7;
+constexpr float kEqW = float(kEqBars) * (kEqBarW + kEqGap) - kEqGap;
+constexpr float kDotsX = kEqX + 96.f;
+constexpr float kDotsY = kEqBase + 31.f;
+constexpr float kTrackW = 300.f;
+constexpr float kTrackX = (W - kTrackW) * 0.5f;
+constexpr float kTrackY = 656.f;
+constexpr float kHeroX = 1055.f;
+constexpr float kHeroY = 408.f;
+constexpr float kHeroR = 104.f;
+
 const char *kLabels[kCount] = {"PLAY", "TRACKS", "SETTINGS", "QUIT"};
 const char *kNames[3] = {"NEON", "BLOOM", "INK"};
 
@@ -110,6 +127,62 @@ void icon(Gfx &g, int kind, float cx, float cy, float s, Color c) {
     default:
         break;
     }
+}
+
+int eqBarAt(float x) {
+    float rel = x - kEqX;
+    int i = int(std::floor((rel + kEqGap * 0.5f) / (kEqBarW + kEqGap)));
+    return (i >= 0 && i < kEqBars) ? i : -1;
+}
+
+int bandOfBar(int i) { return (i < 3) ? 0 : ((i < 5) ? 1 : 2); }
+
+int zoneAt(float x, float y) {
+    if (x >= kDotsX - 16.f && x <= kDotsX + 4.f * 16.f + 12.f &&
+        y >= kDotsY - 15.f && y <= kDotsY + 15.f) {
+        return 4;
+    }
+    if (x >= kTrackX - 12.f && x <= kTrackX + kTrackW + 12.f &&
+        y >= kTrackY - 18.f && y <= kTrackY + 18.f) {
+        return 3;
+    }
+    if (x >= kEqX - 10.f && x <= kEqX + kEqW + 10.f &&
+        y >= kEqBase - kEqMaxH - 24.f && y <= kEqBase + 10.f) {
+        return 1;
+    }
+    float dx = x - kHeroX, dy = y - kHeroY;
+    if (dx * dx + dy * dy <= 140.f * 140.f) {
+        return 2;
+    }
+    return 0;
+}
+
+// Подсказка рядом с курсором: единственный способ рассказать,
+// что декоративные на вид элементы тоже живые.
+void tooltipDraw(Gfx &g, const Style &st, const State &s) {
+    if (s.tipAlpha < 0.01f || s.tipText.empty()) {
+        return;
+    }
+    float a = s.tipAlpha;
+    float tw = g.textWidth(s.tipText, 10, 1.6f, true);
+    float w = tw + 26.f;
+    float h = 26.f;
+    float x = s.cursorX + 20.f;
+    float y = s.cursorY - 38.f;
+    if (x + w > W - 14.f) {
+        x = s.cursorX - 20.f - w;
+    }
+    x = std::max(14.f, x);
+    if (y < 14.f) {
+        y = s.cursorY + 28.f;
+    }
+
+    Color fill = st.text;
+    Color ink = (luminance(fill) < 0.5f) ? hex(0xFFFFFF) : hex(0x141014);
+    g.fillRoundRect({x, y, w, h}, 7.f, 0.f, fade(fill, 0.90f * a));
+    g.fillRect({x + 12.f, y + 6.f, 1.f, h - 12.f}, fade(ink, 0.22f * a));
+    g.text(s.tipText, 10, fade(ink, 0.95f * a), x + 18.f, y + 7.f,
+           Gfx::Left, 1.6f, true);
 }
 
 void topBar(Gfx &g, const Style &st, const State &s) {
@@ -470,19 +543,19 @@ void equalizer(Gfx &g, const Style &st, const State &s) {
     if (a <= 0.002f) {
         return;
     }
-    constexpr float x0 = 72.f;
-    constexpr float base = 530.f;
-    constexpr float bw = 20.f;
-    constexpr float gap = 12.f;
-    constexpr float maxH = 200.f;
-    constexpr int n = 7;
+    constexpr float x0 = kEqX;
+    constexpr float base = kEqBase;
+    constexpr float bw = kEqBarW;
+    constexpr float gap = kEqGap;
+    constexpr float maxH = kEqMaxH;
+    constexpr int n = kEqBars;
 
     g.text("SIGNAL", 10, fade(st.dim, 0.7f * a), x0, 226.f, Gfx::Left, 3.f,
            false);
     g.text("STEREO", 9, fade(st.dim, 0.35f * a), x0, 242.f, Gfx::Left, 3.f,
            false);
 
-    float trackW = float(n) * (bw + gap) - gap;
+    float trackW = kEqW;
 
     g.fillRect({x0, base - maxH, trackW, 1.f}, fade(st.text, 0.06f * a));
     g.fillRect({x0, base + 1.f, trackW, 1.f}, fade(st.text, 0.14f * a));
@@ -493,25 +566,37 @@ void equalizer(Gfx &g, const Style &st, const State &s) {
         float band = (xf < 0.5f) ? std::lerp(s.bandLow, s.bandMid, xf * 2.f)
                                  : std::lerp(s.bandMid, s.bandHigh,
                                              (xf - 0.5f) * 2.f);
-        float wobble = 0.78f + 0.22f * std::sin(s.time * 3.1f + float(i) * 1.3f);
+        int bandIdx = bandOfBar(i);
+        bool muted = s.mute[bandIdx];
+        float hb = (s.hoverZone == 1 && bandIdx == s.hoverBand)
+                       ? s.tipAlpha
+                       : 0.f;
+        float wobble = 0.94f + 0.06f * std::sin(s.time * 3.1f + float(i) * 1.3f);
         float shape = 0.10f + 0.90f * band * wobble;
-        float h = std::min(maxH, 18.f + maxH * shape);
+        float h = muted ? 10.f : std::min(maxH, 18.f + maxH * shape);
         float x = x0 + float(i) * (bw + gap);
         float r = st.radiusFactor * bw * 0.5f;
         Color c = (i % 2 == 0) ? st.accent : st.accent2;
+        if (muted) {
+            c = st.dim;
+        }
 
         g.fillRoundRect({x, base - maxH, bw, maxH}, r, 0.f,
-                        fade(st.text, 0.05f * a));
-        if (st.hardShadow > 0.2f) {
+                        fade(st.text, (0.05f + 0.05f * hb) * a));
+        if (!muted && st.hardShadow > 0.2f) {
             float sh = st.hardShadow * 0.5f;
             g.fillRoundRect({x + sh, base - h + sh, bw, h}, r, 0.f,
                             fade(hex(0x000000), 0.85f * a));
         }
-        g.fillRoundRect({x, base - h, bw, h}, r, 0.f,
-                        fade(c, (0.40f + 0.55f * band) * a));
-        if (st.glow > 0.05f) {
+        float fillA = muted ? 0.16f : (0.40f + 0.55f * band + 0.20f * hb);
+        g.fillRoundRect({x, base - h, bw, h}, r, 0.f, fade(c, fillA * a));
+        if (!muted && st.glow > 0.05f) {
             g.glowCircle(x + bw * 0.5f, base - h * 0.5f, 20.f, c,
-                         0.09f * st.glow * a);
+                         (0.09f + 0.06f * hb) * st.glow * a);
+        }
+        if (hb > 0.01f) {
+            g.fillRect({x, base - h - 3.f, bw, 2.f},
+                       fade(st.text, 0.55f * hb * a));
         }
     }
 
@@ -531,6 +616,10 @@ void equalizer(Gfx &g, const Style &st, const State &s) {
         g.circle(dotsX + float(i) * 16.f, by + 7.f, 3.f,
                  fade(st.accent, (0.22f + 0.78f * lit) * a), 12);
     }
+    if (s.hoverZone == 4) {
+        g.ring(dotsX + 24.f, by + 7.f, 34.f, 1.f,
+               fade(st.accent, 0.35f * s.tipAlpha * a));
+    }
     g.text("4 / 4", 10, fade(st.dim, 0.4f * a), x0 + trackW, by + 1.f,
            Gfx::Right, 2.f, false);
 }
@@ -541,9 +630,9 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
     if (a <= 0.002f) {
         return;
     }
-    constexpr float cx = 1055.f;
-    constexpr float cy = 408.f;
-    constexpr float R = 104.f;
+    constexpr float cx = kHeroX;
+    constexpr float cy = kHeroY;
+    constexpr float R = kHeroR;
     float beat = s.beat;
 
     g.text("CURRENT WORLD", 10, fade(st.dim, 0.7f * a), cx, 226.f,
@@ -655,12 +744,22 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
     icon(g, kIcons[s.selected], cx, cy - 6.f, 2.6f * pop,
          fade(ic, 0.95f * a));
 
-    // Точка на орбите.
-    float oa = s.time * 0.5f;
-    float ox = cx + std::cos(oa) * (R + 24.f);
-    float oy = cy + std::sin(oa) * (R + 24.f);
-    g.glowCircle(ox, oy, 16.f, st.accent, 0.25f * a);
-    g.circle(ox, oy, 3.f, fade(st.accent, a), 16);
+    // Три мира на орбите: активный крупнее — по ним можно кликать/тянуть.
+    for (int k = 0; k < 3; ++k) {
+        float ang = -kPi * 0.5f + float(k) * (kPi * 2.f / 3.f);
+        float ox = cx + std::cos(ang) * (R + 24.f);
+        float oy = cy + std::sin(ang) * (R + 24.f);
+        float on = 1.f - std::min(1.f, std::fabs(s.styleT - float(k)));
+        g.glowCircle(ox, oy, 15.f, st.accent, (0.05f + 0.22f * on) * a);
+        g.circle(ox, oy, 3.f + 2.2f * on,
+                 fade(st.accent, (0.35f + 0.65f * on) * a), 18);
+    }
+
+    if (s.hoverZone == 2 || (s.dragging && s.dragKind == 2)) {
+        float ha = (s.dragging && s.dragKind == 2) ? 1.f : s.tipAlpha;
+        g.ring(cx, cy, R + 33.f + 2.f * std::sin(s.time * 4.f), 1.2f,
+               fade(st.accent, 0.35f * ha * a));
+    }
 
     // Показания под медальоном.
     const char *statLabels[3] = {"TEMPO", "OFFSET", "SYNC"};
@@ -684,11 +783,15 @@ void footer(Gfx &g, const Style &st, const State &s) {
     if (a <= 0.002f) {
         return;
     }
-    constexpr float trackW = 300.f;
-    constexpr float trackX = (W - trackW) * 0.5f;
-    constexpr float trackY = 656.f;
+    constexpr float trackW = kTrackW;
+    constexpr float trackX = kTrackX;
+    constexpr float trackY = kTrackY;
 
-    g.fillRect({trackX, trackY - 1.f, trackW, 2.f}, fade(st.dim, 0.20f * a));
+    float hb = (s.hoverZone == 3 || (s.dragging && s.dragKind == 1))
+                   ? std::max(s.tipAlpha, s.dragging ? 1.f : 0.f)
+                   : 0.f;
+    g.fillRect({trackX, trackY - 1.f, trackW, 2.f},
+               fade(mix(st.dim, st.accent, hb), (0.20f + 0.35f * hb) * a));
 
     int active = std::clamp(int(std::round(s.styleT)), 0, 2);
     for (int k = 0; k < 3; ++k) {
@@ -703,8 +806,13 @@ void footer(Gfx &g, const Style &st, const State &s) {
 
     float kx = trackX + trackW * (s.styleT * 0.5f);
     float pulse = 0.65f + 0.5f * s.beat;
-    g.glowCircle(kx, trackY, 18.f, st.accent, 0.35f * a * pulse);
-    g.circle(kx, trackY, 4.5f, fade(st.accent, a), 24);
+    float kr = 4.5f + 2.5f * hb;
+    g.glowCircle(kx, trackY, 18.f + 6.f * hb, st.accent,
+                 (0.35f + 0.25f * hb) * a * pulse);
+    g.circle(kx, trackY, kr, fade(st.accent, a), 24);
+    if (hb > 0.01f) {
+        g.ring(kx, trackY, kr + 5.f, 1.f, fade(st.text, 0.4f * hb * a));
+    }
 
     g.text("RTHIM / 0.1 — PROTOTYPE", 10, fade(st.dim, 0.55f * a), 44.f,
            684.f, Gfx::Left, 2.f, false);
@@ -776,7 +884,25 @@ void update(State &s, float dt) {
     s.time += dt;
     s.intro += dt;
 
-    s.styleTarget = styleCoordinate(clamp01(s.rawX / W));
+    // Ручное управление миром: тянем шкалу или медальон. Держится,
+    // пока курсор не уедет далеко от точки отпускания.
+    if (s.dragging && s.pointerDown) {
+        if (s.dragKind == 1) {
+            s.override = true;
+            s.overrideT = clamp01((s.rawX - kTrackX) / kTrackW) * 2.f;
+            s.overrideAnchorX = s.rawX;
+        } else if (s.dragKind == 2) {
+            s.override = true;
+            s.overrideT = std::clamp(
+                s.dragStartT + (s.rawX - s.dragStartX) / 260.f, 0.f, 2.f);
+        }
+    }
+    if (s.override && !s.dragging && !s.pointerDown &&
+        std::fabs(s.rawX - s.overrideAnchorX) > 70.f) {
+        s.override = false;
+    }
+    s.styleTarget = s.override ? s.overrideT
+                               : styleCoordinate(clamp01(s.rawX / W));
 
     springTo(s.styleT, s.styleV, s.styleTarget, dt, 64.f, 15.5f);
     springTo(s.cursorX, s.cursorVX, s.rawX, dt, 900.f, 60.f);
@@ -813,6 +939,34 @@ void update(State &s, float dt) {
     if (s.toast > 0.f) {
         s.toast = std::max(0.f, s.toast - dt);
     }
+
+    // Подсказки к не-кнопочным зонам.
+    bool overButton = hitTest(s.rawX, s.rawY) >= 0;
+    int zone = overButton ? 0 : zoneAt(s.rawX, s.rawY);
+    s.hoverZone = zone;
+    if (zone == 1) {
+        int i = eqBarAt(s.rawX);
+        if (i >= 0) {
+            s.hoverBand = bandOfBar(i);
+        }
+    }
+    float tipTarget = (zone != 0) ? 1.f : 0.f;
+    s.tipAlpha += (tipTarget - s.tipAlpha) * (1.f - std::exp(-dt * 22.f));
+
+    static const char *kBandNames[3] = {"LOW", "MID", "HIGH"};
+    if (zone == 1) {
+        s.tipText = std::string(kBandNames[s.hoverBand]) +
+                    (s.mute[s.hoverBand] ? "  ·  CLICK TO UNMUTE"
+                                         : "  ·  CLICK TO MUTE");
+    } else if (zone == 2) {
+        s.tipText = "DRAG / CLICK  ·  WORLD";
+    } else if (zone == 3) {
+        s.tipText = "DRAG  ·  WORLD";
+    } else if (zone == 4) {
+        s.tipText = "CLICK  ·  BAR RESTART";
+    } else {
+        s.tipText.clear();
+    }
 }
 
 void draw(Gfx &g, State &s) {
@@ -836,6 +990,7 @@ void draw(Gfx &g, State &s) {
     footer(g, st, s);
     toastDraw(g, st, s);
     ripple(g, st, s);
+    tooltipDraw(g, st, s);
     cursorDraw(g, st, w, s);
 }
 
@@ -850,6 +1005,78 @@ void activate(State &s, int index) {
     s.rippleT = 0.f;
     s.toastText = std::string(kLabels[index]) + " — NOT WIRED UP YET";
     s.toast = 1.8f;
+}
+
+int handleClick(State &s, float x, float y) {
+    s.rawX = x;
+    s.rawY = y;
+
+    int b = hitTest(x, y);
+    if (b >= 0) {
+        s.selected = b;
+        return b;
+    }
+
+    int zone = zoneAt(x, y);
+    auto pulse = [&](float px, float py) {
+        s.rippleX = px;
+        s.rippleY = py;
+        s.rippleT = 0.f;
+    };
+
+    if (zone == 1) {
+        int i = eqBarAt(x);
+        if (i >= 0) {
+            int band = bandOfBar(i);
+            s.mute[band] = !s.mute[band];
+            static const char *names[3] = {"LOW", "MID", "HIGH"};
+            toast(s, std::string(names[band]) +
+                         (s.mute[band] ? " MUTED" : " ON"));
+            pulse(x, y);
+        }
+    } else if (zone == 4) {
+        s.requestBarRestart = true;
+        toast(s, "BAR RESTART");
+        pulse(x, y);
+    } else if (zone == 3) {
+        s.dragging = true;
+        s.dragKind = 1;
+        s.override = true;
+        s.overrideT = clamp01((x - kTrackX) / kTrackW) * 2.f;
+        s.overrideAnchorX = x;
+        pulse(x, y);
+    } else if (zone == 2) {
+        s.dragging = true;
+        s.dragKind = 2;
+        s.dragStartX = x;
+        s.dragStartY = y;
+        s.dragStartT = s.override ? s.overrideT : s.styleT;
+    }
+    return -1;
+}
+
+void handleRelease(State &s) {
+    float moved = std::hypot(s.rawX - s.dragStartX, s.rawY - s.dragStartY);
+    if (s.dragging && s.dragKind == 2 && moved < 7.f) {
+        // Короткий клик по медальону — следующий мир.
+        float cur = s.override ? s.overrideT : s.styleT;
+        int next = (int(std::lround(cur)) + 1) % 3;
+        s.override = true;
+        s.overrideT = float(next);
+        s.rippleX = kHeroX;
+        s.rippleY = kHeroY;
+        s.rippleT = 0.f;
+        static const char *worlds[3] = {"NEON", "BLOOM", "INK"};
+        toast(s, std::string(worlds[next]) + " WORLD");
+    }
+    s.dragging = false;
+    s.dragKind = 0;
+    s.overrideAnchorX = s.rawX;
+}
+
+void toast(State &s, const std::string &text) {
+    s.toastText = text;
+    s.toast = 1.6f;
 }
 
 int hitTest(float x, float y) {

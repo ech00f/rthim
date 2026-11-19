@@ -13,6 +13,12 @@ bool running();
 // поэтому переход между стилями — это кроссфейд, а не щелчок.
 void setWeights(float w0, float w1, float w2);
 
+// Громкость и мьюты полос (0 — низ, 1 — середина, 2 — верх).
+void setVolume(float v);
+void setBandGain(int band, float gain);
+// Перезапуск такта с первой доли — «дроп» по клику.
+void restartBar();
+
 struct Levels {
     float pulse = 0.f;    // огибающая бочки 0..1 — по ней бьётся интерфейс
     float low = 0.f;      // низ

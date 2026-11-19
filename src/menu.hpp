@@ -46,11 +46,37 @@ struct State {
 
     float toast = 0.f;
     std::string toastText;
+
+    // --- интерактив не-кнопочных зон -------------------------------------
+    bool pointerDown = false;
+    bool dragging = false;
+    int dragKind = 0; // 1 — шкала миров, 2 — медальон
+    float dragStartX = 0.f;
+    float dragStartY = 0.f;
+    float dragStartT = 0.f;
+
+    // Временное ручное управление миром (пока курсор не уехал далеко).
+    bool override = false;
+    float overrideT = 0.f;
+    float overrideAnchorX = 0.f;
+
+    bool mute[3] = {};             // полосы: низ / середина / верх
+    bool requestBarRestart = false;
+
+    int hoverZone = 0;             // 0 — нет, 1 — сигнал, 2 — медальон,
+                                   // 3 — шкала, 4 — доли
+    int hoverBand = 0;
+    float tipAlpha = 0.f;
+    std::string tipText;
 };
 
 void update(State &s, float dt);
 void draw(Gfx &g, State &s);
 void activate(State &s, int index);
+
+int handleClick(State &s, float x, float y); // индекс кнопки или -1
+void handleRelease(State &s);
+void toast(State &s, const std::string &text);
 
 int hitTest(float x, float y);
 int buttonCount();

@@ -173,8 +173,9 @@ int main(int argc, char **argv) {
     }
 
     bool running = true;
-    bool pendingClick = false;
     float mouseWX = 640.f, mouseWY = 360.f;
+    float volume = 0.9f;
+    bool pressEdge = false;
     Uint64 prev = SDL_GetTicks();
 
     auto activate = [&](int index) {
@@ -190,6 +191,12 @@ int main(int argc, char **argv) {
             switch (e.type) {
             case SDL_EVENT_QUIT:
                 running = false;
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                // Если фокус ушёл во время перетаскивания — не залипаем.
+                s.pointerDown = false;
+                s.dragging = false;
+                s.dragKind = 0;
                 break;
             case SDL_EVENT_KEY_DOWN: {
                 SDL_Keycode k = e.key.key;
@@ -214,8 +221,21 @@ int main(int argc, char **argv) {
                 if (e.button.button == SDL_BUTTON_LEFT) {
                     mouseWX = e.button.x;
                     mouseWY = e.button.y;
-                    pendingClick = true;
+                    s.pointerDown = true;
+                    pressEdge = true;
                 }
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                if (e.button.button == SDL_BUTTON_LEFT) {
+                    s.pointerDown = false;
+                    menu::handleRelease(s);
+                }
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                volume = std::clamp(volume + e.wheel.y * 0.05f, 0.f, 1.f);
+                audio::setVolume(volume);
+                menu::toast(s, "VOLUME " + std::to_string(int(volume * 100.f + 0.5f)) +
+                                   "%");
                 break;
             default:
                 break;
@@ -240,6 +260,14 @@ int main(int argc, char **argv) {
         s.rawX = m.x;
         s.rawY = m.y;
 
+        if (pressEdge) {
+            int hit = menu::handleClick(s, s.rawX, s.rawY);
+            if (hit >= 0) {
+                activate(hit);
+            }
+            pressEdge = false;
+        }
+
         menu::update(s, dt);
 
         float sw[3];
@@ -258,13 +286,12 @@ int main(int argc, char **argv) {
             syntheticBeat(s);
         }
 
-        if (pendingClick) {
-            int hit = menu::hitTest(s.rawX, s.rawY);
-            if (hit >= 0) {
-                s.selected = hit;
-                activate(hit);
-            }
-            pendingClick = false;
+        for (int k = 0; k < 3; ++k) {
+            audio::setBandGain(k, s.mute[k] ? 0.f : 1.f);
+        }
+        if (s.requestBarRestart) {
+            audio::restartBar();
+            s.requestBarRestart = false;
         }
 
         menu::draw(g, s);
