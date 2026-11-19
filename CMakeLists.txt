@@ -18,6 +18,7 @@ add_executable(rthim
     src/main.cpp
     src/gfx.cpp
     src/menu.cpp
+    src/audio.cpp
 )
 
 target_link_libraries(rthim PRIVATE PkgConfig::SDL3 PkgConfig::SDL3TTF)

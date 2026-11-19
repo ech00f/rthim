@@ -22,6 +22,15 @@ struct State {
     float time = 0.f;
     float intro = 0.f;
 
+    // Живые уровни из аудиодвижка (или синтетика, если звука нет).
+    float beat = 0.f;         // огибающая бочки
+    float bandLow = 0.f;
+    float bandMid = 0.f;
+    float bandHigh = 0.f;
+    float beatPhase = 0.f;
+    int beatIndex = 0;
+    int bpm = 128;
+
     int selected = 0;
     int prevSelected = 0;
     float hover[4] = {};

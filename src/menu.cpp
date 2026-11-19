@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 namespace menu {
@@ -147,7 +148,8 @@ void backdrop(Gfx &g, const Style &st, const float w[3], const State &s) {
         for (int i = -9; i <= 9; ++i) {
             float pulse = 0.5f + 0.5f * std::sin(time * 1.5f + i * 0.7f);
             g.line(vp.x, vp.y, 640.f + float(i) * 190.f, 800.f, 1.f,
-                   fade(st.accent2, (0.09f + 0.06f * pulse) * a));
+                   fade(st.accent2,
+                        (0.09f + 0.06f * pulse + 0.05f * s.beat) * a));
         }
         for (int k = 0; k < 12; ++k) {
             float f = std::fmod(time * 0.10f + float(k) / 12.f, 1.f);
@@ -211,10 +213,10 @@ void backdrop(Gfx &g, const Style &st, const float w[3], const State &s) {
         for (int i = 0; i < 6; ++i) {
             float x = 120.f + hash01(i + 31) * 1040.f + px * -60.f;
             float y = 80.f + hash01(i + 41) * 560.f + py * -40.f;
-            float r = 100.f + hash01(i + 51) * 170.f;
+            float r = 100.f + hash01(i + 51) * 170.f + s.beat * 12.f;
             float pulse = 0.5f + 0.5f * std::sin(time * 0.5f + float(i) * 1.7f);
             g.glowCircle(x, y, r, (i % 2) ? st.accent2 : st.accent,
-                         (0.045f + 0.05f * pulse) * a);
+                         (0.045f + 0.05f * pulse + 0.05f * s.beat) * a);
         }
 
         for (int i = 0; i < 20; ++i) {
@@ -244,7 +246,8 @@ void backdrop(Gfx &g, const Style &st, const float w[3], const State &s) {
         for (float y = 16.f; y < H; y += 34.f) {
             for (float x = 16.f; x < W; x += 34.f) {
                 float wave = 0.5f + 0.5f * std::sin(x * 0.012f + y * 0.02f + time * 1.3f);
-                float r = 0.9f + 1.8f * (y / H) + 0.5f * wave;
+                float r = 0.9f + 1.8f * (y / H) + 0.5f * wave +
+                          0.35f * s.beat;
                 g.circle(x + std::fmod(y, 34.f) * 0.5f, y, r,
                          fade(st.text, (0.05f + 0.04f * wave) * a), 6);
             }
@@ -302,7 +305,7 @@ void titleBlock(Gfx &g, const Style &st, const float w[3], const State &s) {
     }
 
     if (w[0] > 0.01f) {
-        float pulse = 0.8f + 0.2f * std::sin(s.time * 2.4f);
+        float pulse = 0.75f + 0.45f * s.beat;
         for (int k = 0; k < 4; ++k) {
             float ang = float(k) * kPi * 0.5f;
             g.text(kTitle, kSize,
@@ -403,7 +406,7 @@ void button(Gfx &g, const Style &st, const State &s, int i, float peak) {
     }
 
     if (st.glow > 0.01f) {
-        float gl = st.glow * (0.18f + 0.82f * hover);
+        float gl = st.glow * (0.18f + 0.82f * hover + 0.30f * s.beat);
         g.fillRoundRect(rr.inflated(3.f), rad + 3.f, st.shear,
                         fade(st.accent, 0.09f * gl * a));
         g.fillRoundRect(rr.inflated(8.f), rad + 8.f, st.shear,
@@ -479,18 +482,20 @@ void equalizer(Gfx &g, const Style &st, const State &s) {
     g.text("STEREO", 9, fade(st.dim, 0.35f * a), x0, 242.f, Gfx::Left, 3.f,
            false);
 
-    float beat = std::pow(std::max(0.f, std::sin(s.time * 6.28318f * 2.f)), 6.f);
     float trackW = float(n) * (bw + gap) - gap;
 
     g.fillRect({x0, base - maxH, trackW, 1.f}, fade(st.text, 0.06f * a));
     g.fillRect({x0, base + 1.f, trackW, 1.f}, fade(st.text, 0.14f * a));
 
     for (int i = 0; i < n; ++i) {
-        float ph = float(i) * 0.9f;
-        float wave = 0.5f + 0.5f * std::sin(s.time * 2.4f + ph);
-        float wave2 = 0.5f + 0.5f * std::sin(s.time * 4.1f + ph * 1.7f);
-        float shape = 0.30f + 0.40f * wave + 0.22f * wave2;
-        float h = std::min(maxH, 24.f + maxH * shape * (1.f + 0.18f * beat));
+        // Семь столбиков — это три реальные полосы, растянутые по ширине.
+        float xf = float(i) / float(n - 1);
+        float band = (xf < 0.5f) ? std::lerp(s.bandLow, s.bandMid, xf * 2.f)
+                                 : std::lerp(s.bandMid, s.bandHigh,
+                                             (xf - 0.5f) * 2.f);
+        float wobble = 0.78f + 0.22f * std::sin(s.time * 3.1f + float(i) * 1.3f);
+        float shape = 0.10f + 0.90f * band * wobble;
+        float h = std::min(maxH, 18.f + maxH * shape);
         float x = x0 + float(i) * (bw + gap);
         float r = st.radiusFactor * bw * 0.5f;
         Color c = (i % 2 == 0) ? st.accent : st.accent2;
@@ -503,7 +508,7 @@ void equalizer(Gfx &g, const Style &st, const State &s) {
                             fade(hex(0x000000), 0.85f * a));
         }
         g.fillRoundRect({x, base - h, bw, h}, r, 0.f,
-                        fade(c, (0.55f + 0.30f * wave) * a));
+                        fade(c, (0.40f + 0.55f * band) * a));
         if (st.glow > 0.05f) {
             g.glowCircle(x + bw * 0.5f, base - h * 0.5f, 20.f, c,
                          0.09f * st.glow * a);
@@ -514,8 +519,18 @@ void equalizer(Gfx &g, const Style &st, const State &s) {
     float pulse = 0.6f + 0.4f * std::sin(s.time * 6.28318f * 2.f);
     g.glowCircle(x0 + 3.f, by + 7.f, 11.f, st.accent, 0.30f * a * pulse);
     g.circle(x0 + 3.f, by + 7.f, 3.f, fade(st.accent, a * pulse), 16);
-    g.text("120 BPM", 11, fade(st.dim, 0.8f * a), x0 + 15.f, by,
+    char bpmText[32];
+    std::snprintf(bpmText, sizeof bpmText, "%d BPM", s.bpm);
+    g.text(bpmText, 11, fade(st.dim, 0.8f * a), x0 + 15.f, by,
            Gfx::Left, 2.f, true);
+
+    // Четыре доли такта: текущая вспыхивает на ударе и гаснет.
+    float dotsX = x0 + 96.f;
+    for (int i = 0; i < 4; ++i) {
+        float lit = (i == s.beatIndex) ? (1.f - s.beatPhase) : 0.f;
+        g.circle(dotsX + float(i) * 16.f, by + 7.f, 3.f,
+                 fade(st.accent, (0.22f + 0.78f * lit) * a), 12);
+    }
     g.text("4 / 4", 10, fade(st.dim, 0.4f * a), x0 + trackW, by + 1.f,
            Gfx::Right, 2.f, false);
 }
@@ -529,7 +544,7 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
     constexpr float cx = 1055.f;
     constexpr float cy = 408.f;
     constexpr float R = 104.f;
-    float beat = std::pow(std::max(0.f, std::sin(s.time * 6.28318f * 2.f)), 8.f);
+    float beat = s.beat;
 
     g.text("CURRENT WORLD", 10, fade(st.dim, 0.7f * a), cx, 226.f,
            Gfx::Center, 3.f, false);
@@ -555,6 +570,13 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
     }
 
     float discR = R - 10.f + beat * 2.f;
+
+    // Бочка: от диска расходится короткое кольцо.
+    if (beat > 0.02f) {
+        float rr = discR + 6.f + 22.f * (1.f - beat);
+        g.ring(cx, cy, rr, 1.2f + 2.6f * beat,
+               fade(st.accent, 0.34f * beat * a));
+    }
 
     // Свечение/тень под диском.
     if (w[0] > 0.01f) {
@@ -586,7 +608,7 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
             float r0 = discR * 0.40f;
             float amp = 0.35f + 0.65f * std::fabs(
                                          std::sin(float(i) * 2.1f + s.time * 2.6f));
-            float r1 = r0 + 10.f + discR * 0.34f * amp;
+            float r1 = r0 + 10.f + discR * 0.34f * amp + beat * 14.f;
             g.line(cx + std::cos(ang) * r0, cy + std::sin(ang) * r0,
                    cx + std::cos(ang) * r1, cy + std::sin(ang) * r1, 2.f,
                    fade((i % 2) ? st.accent2 : st.accent, 0.45f * w[0] * a));
@@ -600,7 +622,8 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
         }
         for (int i = 0; i < 8; ++i) {
             float ang = s.time * 0.25f + 6.28318f * float(i) / 8.f;
-            float rr = discR + 18.f + std::sin(s.time * 1.2f + float(i)) * 4.f;
+            float rr = discR + 18.f + std::sin(s.time * 1.2f + float(i)) * 4.f +
+                       beat * 8.f;
             g.ellipse(cx + std::cos(ang) * rr, cy + std::sin(ang) * rr, 9.f,
                       4.4f, ang, fade(st.accent, 0.45f * w[1] * a), 18);
         }
@@ -608,7 +631,7 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
     if (w[2] > 0.01f) {
         std::vector<Pt> wedge;
         wedge.push_back({cx, cy});
-        float baseAng = s.time * 0.18f;
+        float baseAng = s.time * 0.18f + s.beat * 0.10f;
         for (int i = 0; i <= 24; ++i) {
             float ang = baseAng + 1.10f * float(i) / 24.f;
             wedge.push_back({cx + std::cos(ang) * discR,
@@ -641,7 +664,9 @@ void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
 
     // Показания под медальоном.
     const char *statLabels[3] = {"TEMPO", "OFFSET", "SYNC"};
-    const char *statVals[3] = {"120", "+12 MS", "100%"};
+    char tempoText[8];
+    std::snprintf(tempoText, sizeof tempoText, "%d", s.bpm);
+    const char *statVals[3] = {tempoText, "+12 MS", "100%"};
     for (int i = 0; i < 3; ++i) {
         float x = cx + float(i - 1) * 92.f;
         g.text(statLabels[i], 9, fade(st.dim, 0.6f * a), x, 566.f,
@@ -677,7 +702,7 @@ void footer(Gfx &g, const Style &st, const State &s) {
     }
 
     float kx = trackX + trackW * (s.styleT * 0.5f);
-    float pulse = 0.7f + 0.3f * std::sin(s.time * 4.f);
+    float pulse = 0.65f + 0.5f * s.beat;
     g.glowCircle(kx, trackY, 18.f, st.accent, 0.35f * a * pulse);
     g.circle(kx, trackY, 4.5f, fade(st.accent, a), 24);
 
@@ -722,7 +747,7 @@ void cursorDraw(Gfx &g, const Style &st, const float w[3], const State &s) {
     Color cc = mix(st.accent, st.text, hov * 0.85f);
 
     g.glowCircle(s.trailX, s.trailY, 26.f * k, st.accent,
-                 0.10f + 0.10f * hov);
+                 0.10f + 0.10f * hov + 0.08f * s.beat);
 
     if (w[0] > 0.01f) {
         Color c = fade(cc, 0.85f * w[0]);

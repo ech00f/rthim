@@ -1,10 +1,13 @@
+#include "audio.hpp"
 #include "gfx.hpp"
 #include "menu.hpp"
+#include "theme.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -30,6 +33,21 @@ std::string findAssets() {
     return "assets";
 }
 
+// Если аудиоустройства нет — интерфейс всё равно должен биться.
+void syntheticBeat(menu::State &s) {
+    int active = std::clamp(int(std::round(s.styleT)), 0, 2);
+    float bpm = float(audio::styleBpm(active));
+    float beats = s.time * bpm / 60.f;
+    float phase = beats - std::floor(beats);
+    s.bpm = int(bpm);
+    s.beat = std::pow(std::max(0.f, std::sin(phase * 6.2831853f)), 8.f);
+    s.beatIndex = int(std::floor(beats)) & 3;
+    s.beatPhase = phase;
+    s.bandLow = 0.35f + 0.40f * (0.5f + 0.5f * std::sin(s.time * 2.1f));
+    s.bandMid = 0.30f + 0.38f * (0.5f + 0.5f * std::sin(s.time * 3.3f + 1.f));
+    s.bandHigh = 0.18f + 0.32f * (0.5f + 0.5f * std::sin(s.time * 5.7f + 2.f));
+}
+
 void saveShot(SDL_Renderer *ren, const char *path) {
     SDL_Surface *surf = SDL_RenderReadPixels(ren, nullptr);
     if (!surf) {
@@ -48,10 +66,18 @@ void saveShot(SDL_Renderer *ren, const char *path) {
 
 int main(int argc, char **argv) {
     bool shotMode = false;
+    bool bounceMode = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--shot") {
             shotMode = true;
+        } else if (std::string(argv[i]) == "--bounce") {
+            bounceMode = true;
         }
+    }
+
+    if (bounceMode) {
+        // Офлайн-рендер трёх битов в WAV — можно послушать без запуска окна.
+        return audio::bounce("/tmp/opencode", 8.f) ? 0 : 1;
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -89,10 +115,15 @@ int main(int argc, char **argv) {
     Gfx g;
     g.init(ren, findAssets());
 
+    if (!audio::init()) {
+        std::fprintf(stderr, "audio: no output device, using synthetic pulse\n");
+    }
+
     menu::State s;
     s.selected = 0;
 
     auto cleanup = [&]() {
+        audio::shutdown();
         g.shutdown();
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
@@ -114,6 +145,14 @@ int main(int argc, char **argv) {
             for (int k = 0; k < 90; ++k) {
                 menu::update(s, 1.f / 60.f);
             }
+            s.beat = 0.9f;
+            s.bandLow = 0.85f;
+            s.bandMid = 0.60f;
+            s.bandHigh = 0.34f;
+            s.beatIndex = 1;
+            s.beatPhase = 0.2f;
+            s.bpm = audio::styleBpm(
+                std::clamp(int(std::round(s.styleT)), 0, 2));
 
             int pw = 0, ph = 0, ww = 0, wh = 0;
             SDL_GetWindowSizeInPixels(win, &pw, &ph);
@@ -202,6 +241,22 @@ int main(int argc, char **argv) {
         s.rawY = m.y;
 
         menu::update(s, dt);
+
+        float sw[3];
+        styleWeights(s.styleT, sw);
+        audio::setWeights(sw[0], sw[1], sw[2]);
+        if (audio::running()) {
+            audio::Levels lv = audio::levels();
+            s.beat = lv.pulse;
+            s.bandLow = lv.low;
+            s.bandMid = lv.mid;
+            s.bandHigh = lv.high;
+            s.beatPhase = lv.beatPhase;
+            s.beatIndex = lv.beatIndex;
+            s.bpm = lv.bpm;
+        } else {
+            syntheticBeat(s);
+        }
 
         if (pendingClick) {
             int hit = menu::hitTest(s.rawX, s.rawY);
