@@ -1077,6 +1077,13 @@ void App::handleEvent(const SDL_Event &e) {
                 path, dst, std::filesystem::copy_options::overwrite_existing,
                 ec);
             if (!ec) {
+                if (screen == Screen::Play ||
+                    (screen == Screen::Create && creating)) {
+                    song::stop();
+                    paused = false;
+                    audioStarted = false;
+                    creating = false;
+                }
                 db.scan();
                 sel = 0;
                 loadCoverFor(0);
