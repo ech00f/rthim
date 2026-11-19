@@ -124,9 +124,9 @@ void Gfx::begin(int outW, int outH, int winW, int winH) {
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
 
-    SDL_Rect clip{int(std::floor(ox)), int(std::floor(oy)),
-                  int(std::ceil(1280.f * s)), int(std::ceil(720.f * s))};
-    SDL_SetRenderClipRect(ren, &clip);
+    baseClip = {int(std::floor(ox)), int(std::floor(oy)),
+                int(std::ceil(1280.f * s)), int(std::ceil(720.f * s))};
+    SDL_SetRenderClipRect(ren, &baseClip);
 }
 
 void Gfx::end() {
@@ -147,6 +147,55 @@ void Gfx::triC(Pt a, Color ca, Pt b, Color cb, Pt c, Color cc) {
     verts.push_back(va);
     verts.push_back(vb);
     verts.push_back(vc);
+}
+
+void Gfx::pushClip(Rect r) {
+    flush();
+    int x0 = int(std::floor(ox + r.x * scale));
+    int y0 = int(std::floor(oy + r.y * scale));
+    int x1 = int(std::ceil(ox + (r.x + r.w) * scale));
+    int y1 = int(std::ceil(oy + (r.y + r.h) * scale));
+
+    int bx0 = std::max(baseClip.x, x0);
+    int by0 = std::max(baseClip.y, y0);
+    int bx1 = std::min(baseClip.x + baseClip.w, x1);
+    int by1 = std::min(baseClip.y + baseClip.h, y1);
+
+    SDL_Rect c{bx0, by0, std::max(0, bx1 - bx0), std::max(0, by1 - by0)};
+    SDL_SetRenderClipRect(ren, &c);
+}
+
+void Gfx::popClip() {
+    flush();
+    SDL_SetRenderClipRect(ren, &baseClip);
+}
+
+void Gfx::texture(SDL_Texture *tex, Rect dst, float alpha) {
+    if (!tex || alpha <= 0.002f || dst.w <= 0.f || dst.h <= 0.f) {
+        return;
+    }
+    flush();
+    SDL_FRect d{ox + dst.x * scale, oy + dst.y * scale, dst.w * scale,
+                dst.h * scale};
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureAlphaMod(tex, Uint8(std::clamp(alpha, 0.f, 1.f) * 255.f));
+    SDL_SetTextureColorMod(tex, 255, 255, 255);
+    SDL_RenderTexture(ren, tex, nullptr, &d);
+}
+
+SDL_Texture *Gfx::textureFromPixels(const unsigned char *rgba, int w, int h) {
+    if (!rgba || w <= 0 || h <= 0) {
+        return nullptr;
+    }
+    SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32,
+                                         SDL_TEXTUREACCESS_STATIC, w, h);
+    if (!tex) {
+        return nullptr;
+    }
+    SDL_UpdateTexture(tex, nullptr, rgba, w * 4);
+    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    return tex;
 }
 
 void Gfx::flush() {

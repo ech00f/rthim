@@ -22,6 +22,12 @@ struct State {
     float time = 0.f;
     float intro = 0.f;
 
+    // Поведение мира: 0 — за курсором, 1 — авто, 2 — фиксированный.
+    int worldMode = 0;
+    int staticWorld = 0;
+    float autoSpeed = 1.f;
+    float autoT = 0.f;
+
     // Живые уровни из аудиодвижка (или синтетика, если звука нет).
     float beat = 0.f;         // огибающая бочки
     float bandLow = 0.f;
@@ -70,8 +76,11 @@ struct State {
     std::string tipText;
 };
 
+// Общая часть: время, мир, курсор, тосты. Нужна всем экранам.
+void updateCore(State &s, float dt);
 void update(State &s, float dt);
 void draw(Gfx &g, State &s);
+void drawCursor(Gfx &g, State &s);
 void activate(State &s, int index);
 
 int handleClick(State &s, float x, float y); // индекс кнопки или -1

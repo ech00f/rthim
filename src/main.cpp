@@ -1,6 +1,10 @@
+#include "app.hpp"
+#include "beatmap.hpp"
 #include "audio.hpp"
 #include "gfx.hpp"
 #include "menu.hpp"
+#include "paths.hpp"
+#include "song.hpp"
 #include "theme.hpp"
 
 #include <SDL3/SDL.h>
@@ -67,11 +71,20 @@ void saveShot(SDL_Renderer *ren, const char *path) {
 int main(int argc, char **argv) {
     bool shotMode = false;
     bool bounceMode = false;
+    bool shotsMode = false;
+    bool selftestMode = false;
+    bool autoplayMode = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--shot") {
             shotMode = true;
         } else if (std::string(argv[i]) == "--bounce") {
             bounceMode = true;
+        } else if (std::string(argv[i]) == "--shots") {
+            shotsMode = true;
+        } else if (std::string(argv[i]) == "--selftest") {
+            selftestMode = true;
+        } else if (std::string(argv[i]) == "--autoplay") {
+            autoplayMode = true;
         }
     }
 
@@ -111,18 +124,19 @@ int main(int argc, char **argv) {
     }
     SDL_SetRenderVSync(ren, 1);
     SDL_HideCursor();
+    SDL_StartTextInput(win);
 
     Gfx g;
     g.init(ren, findAssets());
+    paths::init(findAssets());
 
     if (!audio::init()) {
         std::fprintf(stderr, "audio: no output device, using synthetic pulse\n");
     }
 
-    menu::State s;
-    s.selected = 0;
-
     auto cleanup = [&]() {
+        song::stop();
+        song::unload();
         audio::shutdown();
         g.shutdown();
         SDL_DestroyRenderer(ren);
@@ -132,13 +146,14 @@ int main(int argc, char **argv) {
     };
 
     if (shotMode) {
+        menu::State s;
+        s.intro = 4.f;
+        s.time = 2.f;
         const struct {
             float x, y;
         } shots[] = {{150.f, 337.f}, {410.f, 415.f}, {640.f, 337.f},
                      {870.f, 493.f}, {1130.f, 337.f}};
         int idx = 0;
-        s.intro = 4.f;
-        s.time = 2.f;
         for (const auto &sh : shots) {
             s.rawX = sh.x;
             s.rawY = sh.y;
@@ -172,18 +187,297 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    App app;
+    if (!app.init(g)) {
+        std::fprintf(stderr, "app init failed\n");
+        cleanup();
+        return 1;
+    }
+    if (app.cfg.fullscreen) {
+        SDL_SetWindowFullscreen(win, true);
+    }
+
+    if (autoplayMode) {
+        if (app.db.count() == 0) {
+            std::fprintf(stderr, "autoplay: no maps\n");
+            cleanup();
+            return 1;
+        }
+        app.startMap(0);
+        if (app.screen != App::Screen::Play) {
+            std::fprintf(stderr, "autoplay: start failed: %s\n",
+                         app.errorText.c_str());
+            cleanup();
+            return 1;
+        }
+        size_t idx = 0;
+        Uint64 prevA = SDL_GetTicks();
+        Uint64 t0 = prevA;
+        while (SDL_GetTicks() - t0 < 12000 && app.screen == App::Screen::Play) {
+            SDL_Event e;
+            while (SDL_PollEvent(&e)) {
+                if (e.type == SDL_EVENT_QUIT) {
+                    app.quit = true;
+                }
+            }
+            Uint64 nowA = SDL_GetTicks();
+            float dt = std::min(0.05f, float(nowA - prevA) / 1000.f);
+            prevA = nowA;
+            app.update(dt);
+
+            if (app.audioStarted && app.screen == App::Screen::Play &&
+                !app.paused) {
+                while (idx < app.play.notes.size() && app.play.hit[idx] != 0) {
+                    ++idx;
+                }
+                if (idx < app.play.notes.size()) {
+                    const game::Spawn &n = app.play.notes[idx];
+                    double d = n.timeMs - (app.play.songMs - app.cfg.offsetMs);
+                    if (std::fabs(d) <= 42.0) {
+                        app.play.arcAngle = n.angle;
+                        game::press(app.play, n.key, app.cfg);
+                    }
+                }
+            }
+            SDL_Delay(2);
+        }
+        // Проверяем, что ESC в паузе действительно снимает паузу.
+        SDL_Event ev{};
+        ev.type = SDL_EVENT_KEY_DOWN;
+        ev.key.scancode = SDL_SCANCODE_ESCAPE;
+        app.handleEvent(ev);
+        bool pausedOnce = app.paused;
+        app.handleEvent(ev);
+        bool pausedTwice = app.paused;
+
+        std::printf("autoplay: audioStarted=%d pos=%.1f notes=%d "
+                    "counts=%d/%d/%d/%d score=%d acc=%.3f pause=%d/%d\n",
+                    int(app.audioStarted), song::positionMs(),
+                    app.play.totalNotes(), app.play.counts[0],
+                    app.play.counts[1], app.play.counts[2],
+                    app.play.counts[3], app.play.score, app.play.accuracy(),
+                    int(pausedOnce), int(pausedTwice));
+        song::stop();
+        cleanup();
+        if (!pausedOnce || pausedTwice) {
+            std::fprintf(stderr, "autoplay: pause toggle failed\n");
+            return 3;
+        }
+        return (app.play.counts[game::kMiss] == 0) ? 0 : 2;
+    }
+
+    if (selftestMode) {
+        if (app.db.count() == 0) {
+            std::fprintf(stderr, "selftest: no maps\n");
+            cleanup();
+            return 1;
+        }
+        app.createSrc = 0;
+        app.createName = "SELFTEST";
+        app.creating = true;
+        app.recorded.clear();
+        const float ang[6] = {0.f, 1.f, 2.f, 3.f, -1.f, -2.f};
+        for (int i = 0; i < 6; ++i) {
+            game::Spawn n;
+            n.timeMs = 1000.0 + i * 700.0;
+            n.angle = ang[i];
+            n.key = i % 2;
+            app.recorded.push_back(n);
+        }
+        app.saveCustom();
+
+        int found = -1;
+        for (int i = 0; i < app.db.count(); ++i) {
+            if (app.db.entries[i].custom &&
+                app.db.entries[i].map.version == "SELFTEST") {
+                found = i;
+            }
+        }
+        if (found < 0) {
+            std::fprintf(stderr, "selftest: saved map not found\n");
+            cleanup();
+            return 1;
+        }
+        mapdb::Entry &e = app.db.entries[found];
+        beatmap::Map check;
+        std::string err;
+        bool ok = beatmap::loadOsu(e.sourcePath, check, err);
+        std::printf("selftest map: %s objects=%zu bpm=%.2f\n",
+                    e.sourcePath.c_str(), check.objects.size(), check.bpm);
+        if (!ok || check.objects.size() != 6) {
+            std::fprintf(stderr, "selftest: reload failed: %s\n", err.c_str());
+            cleanup();
+            return 1;
+        }
+        app.startMap(found);
+        if (app.screen != App::Screen::Play) {
+            std::fprintf(stderr, "selftest: play failed: %s\n",
+                         app.errorText.c_str());
+            cleanup();
+            return 1;
+        }
+        std::printf("selftest play ok: notes=%d title=%s\n",
+                    app.play.totalNotes(), app.play.title.c_str());
+        song::stop();
+        cleanup();
+        return 0;
+    }
+
+    if (shotsMode) {
+        auto snap = [&](const char *name) {
+            int pw = 0, ph = 0, ww = 0, wh = 0;
+            SDL_GetWindowSizeInPixels(win, &pw, &ph);
+            SDL_GetWindowSize(win, &ww, &wh);
+            g.begin(pw, ph, ww, wh);
+            app.draw(g);
+            g.end();
+            std::string path = std::string("/tmp/opencode/shot_") + name + ".png";
+            saveShot(ren, path.c_str());
+            SDL_RenderPresent(ren);
+        };
+
+        auto warm = [&](int frames) {
+            for (int i = 0; i < frames; ++i) {
+                menu::updateCore(app.ui, 1.f / 60.f);
+                app.update(1.f / 60.f);
+            }
+        };
+
+        app.cfg.worldMode = 2;
+        app.db.scan();
+        if (app.db.count() == 0) {
+            std::fprintf(stderr, "shots: no maps in songs/\n");
+            cleanup();
+            return 1;
+        }
+
+        app.mouseMoved(720.f, 300.f);
+        app.ui.intro = 4.f;
+
+        // Выбор карты.
+        app.screen = App::Screen::Select;
+        app.sel = 0;
+        app.cfg.staticWorld = 0;
+        app.ui.styleT = 0.f;
+        app.loadCoverFor(0);
+        warm(70);
+        snap("select");
+
+        // Настройки.
+        app.screen = App::Screen::Settings;
+        app.setCat = 0;
+        app.setRow = 2;
+        app.cfg.staticWorld = 1;
+        app.ui.styleT = 1.0f;
+        app.mouseMoved(700.f, 330.f);
+        warm(60);
+        snap("settings");
+
+        // Создание карты.
+        app.screen = App::Screen::Create;
+        app.createSrc = 0;
+        app.cfg.staticWorld = 2;
+        app.ui.styleT = 2.0f;
+        app.mouseMoved(760.f, 250.f);
+        warm(60);
+        snap("create");
+
+        // Запись карты.
+        app.play = game::State{};
+        app.play.title = app.db.entries[0].title();
+        app.play.diff = app.createName;
+        app.play.bpm = app.db.entries[0].map.bpm;
+        app.play.offsetBeatMs = app.db.entries[0].map.offsetMs;
+        app.play.startMs = 0.0;
+        app.play.endMs = app.db.entries[0].lengthMs;
+        app.play.songMs = 34200.0;
+        app.play.arcAngle = -0.4f;
+        app.creating = true;
+        app.recorded.clear();
+        for (int i = 0; i < 7; ++i) {
+            game::Spawn n;
+            n.timeMs = 3000.0 + i * 1600.0;
+            n.angle = -2.2f + i * 0.55f;
+            n.key = i % 3 == 2 ? 1 : 0;
+            app.recorded.push_back(n);
+        }
+        app.recCount = 0.6f;
+        snap("record");
+        app.creating = false;
+
+        // Геймплей: сдвигаем время и рисуем сцену с историей.
+        app.cfg.staticWorld = 0;
+        app.ui.styleT = 0.0f;
+        app.startMap(0);
+        if (app.screen == App::Screen::Play) {
+            app.audioStarted = true;
+            game::State &gs = app.play;
+            size_t idx = std::min<size_t>(14, gs.notes.size() - 1);
+            gs.songMs = gs.notes[idx].timeMs - 260.0;
+            gs.arcAngle = gs.notes[idx].angle;
+            gs.targetAngle = gs.arcAngle;
+            size_t hitn = std::min<size_t>(8, idx);
+            for (size_t i = 0; i < hitn; ++i) {
+                gs.hit[i] = 1;
+                gs.judge[i] = game::kPerfect;
+                gs.counts[game::kPerfect]++;
+                gs.combo++;
+                gs.score += 300 + i * 2;
+            }
+            gs.alive = hitn;
+            gs.score = 48210;
+            gs.maxCombo = gs.combo;
+            gs.lastJudge = game::kPerfect;
+            gs.judgeT = 0.08f;
+            gs.flash = 1.f;
+            gs.bursts.push_back({gs.notes[hitn - 1].angle, 0.3f, 0});
+            menu::updateCore(app.ui, 1.f / 60.f);
+            snap("play");
+        } else {
+            std::fprintf(stderr, "shots: no playable map: %s\n",
+                         app.errorText.c_str());
+        }
+
+        // Пауза.
+        if (app.screen == App::Screen::Play) {
+            app.paused = true;
+            app.mouseMoved(640.f, 350.f);
+            app.pauseHover[0] = 1.f;
+            snap("pause");
+            app.paused = false;
+        }
+
+        // Результаты.
+        song::stop();
+        app.screen = App::Screen::Results;
+        app.cfg.staticWorld = 1;
+        app.frozenWorld = 1;
+        app.ui.styleT = 1.0f;
+        app.resClear = true;
+        app.resAcc = 0.94;
+        app.resScore = 298420;
+        app.resMaxCombo = 301;
+        app.resCounts[0] = 468;
+        app.resCounts[1] = 40;
+        app.resCounts[2] = 4;
+        app.resCounts[3] = 8;
+        app.resTitle = app.db.count() > 0 ? app.db.entries[0].title() : "SONG";
+        app.resDiff = app.db.count() > 0 ? app.db.entries[0].map.version : "DIFF";
+        app.mouseMoved(560.f, 630.f);
+        for (int i = 0; i < 3; ++i) {
+            app.resHover[i] = (i == 0) ? 1.f : 0.f;
+        }
+        warm(40);
+        snap("results");
+
+        cleanup();
+        return 0;
+    }
+
     bool running = true;
     float mouseWX = 640.f, mouseWY = 360.f;
-    float volume = 0.9f;
-    bool pressEdge = false;
+    float volume = app.cfg.master;
     Uint64 prev = SDL_GetTicks();
-
-    auto activate = [&](int index) {
-        menu::activate(s, index);
-        if (index == menu::buttonCount() - 1) {
-            running = false;
-        }
-    };
 
     while (running) {
         SDL_Event e;
@@ -192,53 +486,43 @@ int main(int argc, char **argv) {
             case SDL_EVENT_QUIT:
                 running = false;
                 break;
-            case SDL_EVENT_WINDOW_FOCUS_LOST:
-                // Если фокус ушёл во время перетаскивания — не залипаем.
-                s.pointerDown = false;
-                s.dragging = false;
-                s.dragKind = 0;
-                break;
-            case SDL_EVENT_KEY_DOWN: {
-                SDL_Keycode k = e.key.key;
-                int n = menu::buttonCount();
-                if (k == SDLK_ESCAPE) {
-                    running = false;
-                } else if (k == SDLK_DOWN || k == SDLK_S) {
-                    s.selected = (s.selected + 1) % n;
-                } else if (k == SDLK_UP || k == SDLK_W) {
-                    s.selected = (s.selected + n - 1) % n;
-                } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER ||
-                           k == SDLK_SPACE) {
-                    activate(s.selected);
-                }
-                break;
-            }
             case SDL_EVENT_MOUSE_MOTION:
                 mouseWX = e.motion.x;
                 mouseWY = e.motion.y;
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                if (e.button.button == SDL_BUTTON_LEFT) {
-                    mouseWX = e.button.x;
-                    mouseWY = e.button.y;
-                    s.pointerDown = true;
-                    pressEdge = true;
-                }
-                break;
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                if (e.button.button == SDL_BUTTON_LEFT) {
-                    s.pointerDown = false;
-                    menu::handleRelease(s);
-                }
-                break;
-            case SDL_EVENT_MOUSE_WHEEL:
-                volume = std::clamp(volume + e.wheel.y * 0.05f, 0.f, 1.f);
-                audio::setVolume(volume);
-                menu::toast(s, "VOLUME " + std::to_string(int(volume * 100.f + 0.5f)) +
-                                   "%");
+                mouseWX = e.button.x;
+                mouseWY = e.button.y;
                 break;
             default:
                 break;
+            }
+
+            if (e.type == SDL_EVENT_QUIT) {
+                continue;
+            }
+
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+                Pt m = g.windowToLogical(mouseWX, mouseWY);
+                app.mouseMoved(m.x, m.y);
+            }
+
+            if (e.type == SDL_EVENT_MOUSE_WHEEL &&
+                app.screen == App::Screen::Menu) {
+                volume = std::clamp(volume + e.wheel.y * 0.05f, 0.f, 1.f);
+                app.cfg.master = volume;
+                app.cfg.save(paths::settingsFile());
+                menu::toast(app.ui,
+                            "VOLUME " +
+                                std::to_string(int(volume * 100.f + 0.5f)) + "%");
+                continue;
+            }
+
+            app.handleEvent(e);
+            if (app.quit) {
+                running = false;
             }
         }
 
@@ -254,47 +538,49 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        g.begin(pw, ph, ww, wh);
-
         Pt m = g.windowToLogical(mouseWX, mouseWY);
-        s.rawX = m.x;
-        s.rawY = m.y;
+        app.mouseMoved(m.x, m.y);
 
-        if (pressEdge) {
-            int hit = menu::handleClick(s, s.rawX, s.rawY);
-            if (hit >= 0) {
-                activate(hit);
-            }
-            pressEdge = false;
+        app.update(dt);
+
+        if (app.wantFullscreenApply) {
+            SDL_SetWindowFullscreen(win, app.cfg.fullscreen);
+            app.wantFullscreenApply = false;
         }
 
-        menu::update(s, dt);
+        // Музыка меню: процедурные биты играют на всех «менюшных» экранах,
+        // в игре и записи — тишина, чтобы не мешать песне.
+        if (app.menuMusicActive()) {
+            float sw[3];
+            styleWeights(app.ui.styleT, sw);
+            audio::setWeights(sw[0], sw[1], sw[2]);
+        } else {
+            audio::setWeights(0.f, 0.f, 0.f);
+        }
 
-        float sw[3];
-        styleWeights(s.styleT, sw);
-        audio::setWeights(sw[0], sw[1], sw[2]);
         if (audio::running()) {
             audio::Levels lv = audio::levels();
-            s.beat = lv.pulse;
-            s.bandLow = lv.low;
-            s.bandMid = lv.mid;
-            s.bandHigh = lv.high;
-            s.beatPhase = lv.beatPhase;
-            s.beatIndex = lv.beatIndex;
-            s.bpm = lv.bpm;
+            app.ui.beat = lv.pulse;
+            app.ui.bandLow = lv.low;
+            app.ui.bandMid = lv.mid;
+            app.ui.bandHigh = lv.high;
+            app.ui.beatPhase = lv.beatPhase;
+            app.ui.beatIndex = lv.beatIndex;
+            app.ui.bpm = lv.bpm;
         } else {
-            syntheticBeat(s);
+            syntheticBeat(app.ui);
         }
 
         for (int k = 0; k < 3; ++k) {
-            audio::setBandGain(k, s.mute[k] ? 0.f : 1.f);
+            audio::setBandGain(k, app.ui.mute[k] ? 0.f : 1.f);
         }
-        if (s.requestBarRestart) {
+        if (app.ui.requestBarRestart) {
             audio::restartBar();
-            s.requestBarRestart = false;
+            app.ui.requestBarRestart = false;
         }
 
-        menu::draw(g, s);
+        g.begin(pw, ph, ww, wh);
+        app.draw(g);
         g.end();
         SDL_RenderPresent(ren);
     }

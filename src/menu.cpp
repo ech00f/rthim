@@ -879,7 +879,7 @@ void cursorDraw(Gfx &g, const Style &st, const float w[3], const State &s) {
 
 } // namespace
 
-void update(State &s, float dt) {
+void updateCore(State &s, float dt) {
     dt = std::min(dt, 1.f / 30.f);
     s.time += dt;
     s.intro += dt;
@@ -901,14 +901,35 @@ void update(State &s, float dt) {
         std::fabs(s.rawX - s.overrideAnchorX) > 70.f) {
         s.override = false;
     }
-    s.styleTarget = s.override ? s.overrideT
-                               : styleCoordinate(clamp01(s.rawX / W));
+
+    if (s.override) {
+        s.styleTarget = s.overrideT;
+    } else if (s.worldMode == 1) {
+        s.autoT += dt * 0.055f * std::max(0.2f, s.autoSpeed);
+        s.styleTarget = 1.f - std::cos(s.autoT * 6.28318f);
+    } else if (s.worldMode == 2) {
+        s.styleTarget = float(std::clamp(s.staticWorld, 0, 2));
+    } else {
+        s.styleTarget = styleCoordinate(clamp01(s.rawX / W));
+    }
 
     springTo(s.styleT, s.styleV, s.styleTarget, dt, 64.f, 15.5f);
     springTo(s.cursorX, s.cursorVX, s.rawX, dt, 900.f, 60.f);
     springTo(s.cursorY, s.cursorVY, s.rawY, dt, 900.f, 60.f);
     springTo(s.trailX, s.trailVX, s.rawX, dt, 110.f, 21.f);
     springTo(s.trailY, s.trailVY, s.rawY, dt, 110.f, 21.f);
+
+    if (s.rippleT < 2.f) {
+        s.rippleT += dt;
+    }
+    if (s.toast > 0.f) {
+        s.toast = std::max(0.f, s.toast - dt);
+    }
+}
+
+void update(State &s, float dt) {
+    dt = std::min(dt, 1.f / 30.f);
+    updateCore(s, dt);
 
     int over = hitTest(s.rawX, s.rawY);
     if (over >= 0) {
@@ -932,13 +953,6 @@ void update(State &s, float dt) {
         s.indicatorY = targetY;
     }
     springTo(s.indicatorY, s.indicatorV, targetY, dt, 140.f, 18.f);
-
-    if (s.rippleT < 2.f) {
-        s.rippleT += dt;
-    }
-    if (s.toast > 0.f) {
-        s.toast = std::max(0.f, s.toast - dt);
-    }
 
     // Подсказки к не-кнопочным зонам.
     bool overButton = hitTest(s.rawX, s.rawY) >= 0;
@@ -994,6 +1008,13 @@ void draw(Gfx &g, State &s) {
     cursorDraw(g, st, w, s);
 }
 
+void drawCursor(Gfx &g, State &s) {
+    Style st = blendStyle(s.styleT);
+    float w[3];
+    styleWeights(s.styleT, w);
+    cursorDraw(g, st, w, s);
+}
+
 void activate(State &s, int index) {
     if (index < 0 || index >= kCount) {
         return;
@@ -1003,8 +1024,8 @@ void activate(State &s, int index) {
     s.rippleX = r.x + r.w * 0.5f;
     s.rippleY = r.y + r.h * 0.5f;
     s.rippleT = 0.f;
-    s.toastText = std::string(kLabels[index]) + " — NOT WIRED UP YET";
-    s.toast = 1.8f;
+    // Экраны теперь настоящие: тост «not wired» больше не нужен.
+    s.toast = 0.f;
 }
 
 int handleClick(State &s, float x, float y) {

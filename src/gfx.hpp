@@ -67,6 +67,14 @@ public:
     void line(float x1, float y1, float x2, float y2, float thickness,
               Color c);
 
+    // Текстура (фон карты) поверх накопленных фигур, с прозрачностью.
+    void texture(SDL_Texture *tex, Rect dst, float alpha = 1.f);
+    SDL_Texture *textureFromPixels(const unsigned char *rgba, int w, int h);
+
+    // Обрезка списков (flush перед сменой области — порядок сохраняется).
+    void pushClip(Rect r);
+    void popClip();
+
     void text(const std::string &s, int size, Color c, float x, float y,
               Align align = Left, float spacing = 0.f, bool medium = false);
     float textWidth(const std::string &s, int size, float spacing = 0.f,
@@ -95,6 +103,7 @@ private:
     float scale = 1.f, ox = 0.f, oy = 0.f;
     float pxPerPoint = 1.f, pyPerPoint = 1.f;
     std::string assets;
+    SDL_Rect baseClip{};
     std::unordered_map<int, TTF_Font *> fonts;
     std::unordered_map<std::string, TextTex> glyphs;
     std::vector<SDL_Vertex> verts;

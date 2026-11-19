@@ -13,15 +13,28 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
 pkg_check_modules(SDL3TTF REQUIRED IMPORTED_TARGET sdl3-ttf)
+pkg_check_modules(MPG123 REQUIRED IMPORTED_TARGET libmpg123)
+find_package(ZLIB REQUIRED)
 
 add_executable(rthim
     src/main.cpp
+    src/app.cpp
     src/gfx.cpp
     src/menu.cpp
     src/audio.cpp
+    src/song.cpp
+    src/beatmap.cpp
+    src/mapdb.cpp
+    src/settings.cpp
+    src/settings_ui.cpp
+    src/paths.cpp
+    src/ui.cpp
+    src/screens.cpp
+    src/gameplay.cpp
 )
 
-target_link_libraries(rthim PRIVATE PkgConfig::SDL3 PkgConfig::SDL3TTF)
+target_link_libraries(rthim PRIVATE PkgConfig::SDL3 PkgConfig::SDL3TTF
+    PkgConfig::MPG123 ZLIB::ZLIB)
 target_compile_options(rthim PRIVATE -Wall -Wextra -Wpedantic)
 
 # Ассеты (шрифты) копируются рядом с бинарником при сборке.
