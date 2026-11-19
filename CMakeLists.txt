@@ -26,6 +26,7 @@ add_executable(rthim
     src/beatmap.cpp
     src/mapdb.cpp
     src/settings.cpp
+    src/scores.cpp
     src/settings_ui.cpp
     src/paths.cpp
     src/ui.cpp

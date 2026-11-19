@@ -61,19 +61,21 @@ Row info(const char *label, const char *hint) {
 
 } // namespace
 
-int catCount() { return 5; }
+int catCount() { return 6; }
 
 const char *catName(int i) {
     switch (i) {
     case 0:
         return "GAME";
     case 1:
-        return "AUDIO";
+        return "PLAY";
     case 2:
-        return "MENU";
+        return "AUDIO";
     case 3:
-        return "KEYS";
+        return "MENU";
     case 4:
+        return "KEYS";
+    case 5:
         return "VIDEO";
     default:
         return "";
@@ -85,12 +87,14 @@ const char *catTag(int i) {
     case 0:
         return "TIMING · VISUALS";
     case 1:
-        return "LEVELS";
+        return "START · ASSIST";
     case 2:
-        return "WORLD STYLE";
+        return "LEVELS";
     case 3:
-        return "BINDINGS";
+        return "WORLD STYLE";
     case 4:
+        return "BINDINGS";
+    case 5:
         return "DISPLAY";
     default:
         return "";
@@ -103,9 +107,20 @@ RowList rowsFor(int cat, Settings &s) {
     case 0:
         l.rows[l.n++] = choice("TIMING WINDOW", "Насколько щедро окно попадания",
                                &s.timing, kTiming, 3);
-        l.rows[l.n++] = slider("APPROACH", "Время полёта метеорита", 
+        l.rows[l.n++] = slider("APPROACH", "Время полёта метеорита",
                                &s.approachSec, 0.8f, 2.2f, 0.05f,
                                Fmt::Seconds);
+        l.rows[l.n++] = slider("BACKGROUND DIM", "Затемнение фона карты",
+                               &s.bgDim, 0.f, 0.9f, 0.05f, Fmt::Percent);
+        l.rows[l.n++] = toggle("HIT SOUNDS", "Щелчок при попадании",
+                               &s.hitSound);
+        l.rows[l.n++] = toggle("SCREEN SHAKE", "Тряска на сильных ударах",
+                               &s.screenShake);
+        l.rows[l.n++] = toggle("PARTICLES", "Искры и вспышки", &s.particles);
+        break;
+    case 1:
+        l.rows[l.n++] = slider("COUNTDOWN", "Отсчёт перед стартом карты",
+                               &s.leadInSec, 0.5f, 6.f, 0.1f, Fmt::Seconds);
         {
             Row r;
             r.label = "OFFSET";
@@ -118,15 +133,11 @@ RowList rowsFor(int cat, Settings &s) {
             r.step = 5.f;
             l.rows[l.n++] = r;
         }
-        l.rows[l.n++] = slider("BACKGROUND DIM", "Затемнение фона карты",
-                               &s.bgDim, 0.f, 0.9f, 0.05f, Fmt::Percent);
-        l.rows[l.n++] = toggle("HIT SOUNDS", "Щелчок при попадании",
-                               &s.hitSound);
-        l.rows[l.n++] = toggle("SCREEN SHAKE", "Тряска на сильных ударах",
-                               &s.screenShake);
-        l.rows[l.n++] = toggle("PARTICLES", "Искры и вспышки", &s.particles);
+        l.rows[l.n++] = toggle("AUTOPLAY", "Игра играет сама — демо и практика",
+                               &s.autoplay);
+        l.rows[l.n++] = info("RESTART", "R — начать карту заново");
         break;
-    case 1:
+    case 2:
         l.rows[l.n++] = slider("MASTER", "Общая громкость", &s.master, 0.f,
                                1.f, 0.05f, Fmt::Percent);
         l.rows[l.n++] = slider("MUSIC", "Громкость песни", &s.music, 0.f, 1.f,
@@ -134,7 +145,7 @@ RowList rowsFor(int cat, Settings &s) {
         l.rows[l.n++] = slider("SFX", "Громкость ударов", &s.sfx, 0.f, 1.f,
                                0.05f, Fmt::Percent);
         break;
-    case 2:
+    case 3:
         l.rows[l.n++] = choice("WORLD CONTROL", "Кто двигает мир меню",
                                &s.worldMode, kWorldMode, 3);
         l.rows[l.n++] = choice("FIXED WORLD", "Мир для режима STATIC",
@@ -143,15 +154,16 @@ RowList rowsFor(int cat, Settings &s) {
                                &s.autoSpeed, 0.3f, 2.f, 0.1f,
                                Fmt::Multiplier, 1);
         break;
-    case 3:
+    case 4:
         l.rows[l.n++] = choice("LAYOUT", "Раскладка двух клавиш", &s.keyPreset,
                                kKeys, 4);
         l.rows[l.n++] = info("HIT KEYS", "Слева — первый цвет, справа — второй");
         l.rows[l.n++] = info("PAUSE", "ESC в игре");
         break;
-    case 4:
+    case 5:
         l.rows[l.n++] = toggle("FULLSCREEN", "Полноэкранный режим",
                                &s.fullscreen);
+        l.rows[l.n++] = info("F11", "Переключить на весь экран");
         l.rows[l.n++] = info("VSYNC", "Всегда включён");
         l.rows[l.n++] = info("RESOLUTION", "Логическое полотно 1280 × 720");
         break;

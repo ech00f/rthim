@@ -2,6 +2,7 @@
 
 #include "gameplay.hpp"
 #include "mapdb.hpp"
+#include "scores.hpp"
 #include "menu.hpp"
 #include "settings.hpp"
 
@@ -30,6 +31,7 @@ struct App {
     float selScroll = 0.f;
     float selScrollV = 0.f;
     int selHover = -1;
+    int sortMode = 0; // ARTIST / TITLE / BPM / LENGTH / RECENT
     float selHoverAnim[32] = {};
     float selBtnHover[3] = {};
 
@@ -54,6 +56,7 @@ struct App {
     bool nameEdit = true;
     int pendingRec = -1;
     double lastRecMs = -1000.0;
+    long long metroBeat = 0;
     std::vector<game::Spawn> recorded;
     float recCount = 0.f; // для анимации вспышки
     std::string createMsg;
@@ -80,6 +83,10 @@ struct App {
     int resSel = 0;
     float resHover[4] = {};
     std::string resTitle, resDiff;
+    ScoreEntry resBest;
+    bool resNewBest = false;
+    std::vector<float> resDeltas;
+    float resMeanDelta = 0.f;
 
     bool wantFullscreenApply = false;
 
@@ -99,6 +106,8 @@ struct App {
     void finishMap(bool clear);
     void saveCustom();
     void loadCoverFor(int index);
+    void resortMaps();
+    const char *sortName() const;
 
     void updateMenu(float dt);
     void updateSelect(float dt);
@@ -119,6 +128,7 @@ struct App {
     void keyPlay(int sc);
     void adjustSetting(int row, int dir);
     void setSlider(int row, float x);
+    double snapTime(double pos) const;
 
     // отрисовка (screens.cpp)
     void drawSelect(Gfx &g);

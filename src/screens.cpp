@@ -173,8 +173,22 @@ void selectDetail(Gfx &g, const Style &st, App &a) {
     }
 
     std::string by = "MAPPED BY " + e.map.creator;
-    g.text(fit(g, by, 9, cr.w), 9, fade(st.dim, 0.55f), cr.x, 594.f,
+    g.text(fit(g, by, 9, cr.w), 9, fade(st.dim, 0.55f), cr.x, 592.f,
            Gfx::Left, 2.f, false);
+
+    // Личный рекорд.
+    const ScoreEntry *best = scores::get(e.id);
+    char bb[96];
+    if (best && best->valid) {
+        std::snprintf(bb, sizeof bb, "BEST %07d  ·  %.2f%%  ·  %d %s",
+                      best->score, best->acc * 100.0, best->plays,
+                      best->plays == 1 ? "PLAY" : "PLAYS");
+        g.text(bb, 9, fade(st.accent, 0.82f), cr.x, 612.f, Gfx::Left, 1.4f,
+               true);
+    } else {
+        g.text("NOT PLAYED YET", 9, fade(st.dim, 0.45f), cr.x, 612.f,
+               Gfx::Left, 1.8f, false);
+    }
 }
 
 void selectEmpty(Gfx &g, const Style &st) {
@@ -297,9 +311,11 @@ void App::drawSelect(Gfx &g) {
 
     char cnt[64];
     std::snprintf(cnt, sizeof cnt,
-                  "%d %s  ·  WHEEL TO SCROLL  ·  R TO RESCAN  ·  DROP .OSZ",
+                  "%d %s  ·  WHEEL  ·  R RESCAN  ·  S SORT  ·  DROP .OSZ",
                   db.count(), db.count() == 1 ? "MAP" : "MAPS");
-    g.text(cnt, 9, fade(st.dim, 0.55f), 64.f, 74.f, Gfx::Left, 2.f, false);
+    g.text(cnt, 9, fade(st.dim, 0.55f), 64.f, 74.f, Gfx::Left, 1.8f, false);
+    g.text(std::string("SORT: ") + sortName(), 9, fade(st.dim, 0.5f),
+           W - 64.f, 74.f, Gfx::Right, 2.f, false);
 
     // Список.
     Rect list = layout::kSelectList;
@@ -350,7 +366,7 @@ void App::drawSelect(Gfx &g) {
         g.text(notes, 8, fade(st.dim, 0.4f), rr.x + rr.w - 20.f,
                rr.y + 50.f, Gfx::Right, 1.2f, false);
         if (db.entries[i].custom) {
-            Rect chipR{rr.x + rr.w - 132.f, rr.y + 44.f, 54.f, 16.f};
+            Rect chipR{rr.x + 54.f, rr.y + 51.f, 54.f, 13.f};
             ::ui::chip(g, st, chipR, "CUSTOM", true);
         }
     }
@@ -482,9 +498,26 @@ void App::drawCreate(Gfx &g) {
                                      : std::max(1.0, song::durationMs());
         double pos = play.songMs;
         float prog = float(std::clamp(pos / dur, 0.0, 1.0));
-        g.fillRect({64.f, 116.f, W - 128.f, 2.f}, fade(st.text, 0.10f));
-        g.fillRect({64.f, 116.f, (W - 128.f) * prog, 2.f},
+        g.fillRect({64.f, 126.f, W - 128.f, 2.f}, fade(st.text, 0.10f));
+        g.fillRect({64.f, 126.f, (W - 128.f) * prog, 2.f},
                    fade(st.accent, 0.8f));
+
+        // Доли песни на таймлайне — видно, куда попадают ноты.
+        if (play.bpm > 1.0) {
+            double beat = 60000.0 / play.bpm;
+            int bi = 0;
+            for (double t = play.offsetBeatMs; t < dur && bi < 2000;
+                 t += beat, ++bi) {
+                if (t < 0.0) {
+                    continue;
+                }
+                float x = 64.f + (W - 128.f) * float(t / dur);
+                bool bar = (bi % 4 == 0);
+                g.fillRect({x, 126.f - (bar ? 5.f : 2.f), 1.f,
+                            bar ? 7.f : 4.f},
+                           fade(st.text, bar ? 0.24f : 0.09f));
+            }
+        }
 
         // REC.
         float blink = 0.55f + 0.45f * std::sin(ui.time * 6.f);
@@ -498,11 +531,19 @@ void App::drawCreate(Gfx &g) {
         std::snprintf(cnt, sizeof cnt, "%zu NOTES", recorded.size());
         g.text(cnt, 18, fade(st.text, 0.9f), W - 64.f, 64.f, Gfx::Right, 1.2f,
                true);
-        g.text("Z / X — поставить · ESC — сохранить", 9,
-               fade(st.dim, 0.55f), W - 64.f, 92.f, Gfx::Right, 1.6f, false);
-        g.text("Наведи дугу на будущий метеорит и нажми клавишу в такт",
-               10, fade(st.dim, 0.5f), 640.f, 676.f, Gfx::Center, 1.2f,
+        g.text("Z / X — нота · BACKSPACE — отменить · ESC — сохранить", 9,
+               fade(st.dim, 0.55f), W - 64.f, 88.f, Gfx::Right, 1.6f, false);
+        std::string grid = std::string("G — СЕТКА 1/4 ") +
+                           (cfg.mapSnap ? "ON" : "OFF") +
+                           "   M — МЕТРОНОМ " +
+                           (cfg.metronome ? "ON" : "OFF");
+        g.text(grid, 8, fade(st.dim, 0.55f), 64.f, 108.f, Gfx::Left, 1.5f,
                false);
+        g.text("Наведи дугу на будущий метеорит и нажми клавишу в такт",
+               10, fade(st.dim, 0.5f), 640.f, 668.f, Gfx::Center, 1.2f,
+               false);
+        g.text("BACKSPACE — убрать последнюю · G — сетка · M — метроном", 8,
+               fade(st.dim, 0.4f), 640.f, 688.f, Gfx::Center, 1.6f, false);
 
         drawToast(g);
         menu::drawCursor(g, ui);
@@ -629,15 +670,22 @@ void App::drawPauseOverlay(Gfx &g) {
     g.fillRoundRect(panel, 20.f, 0.f, fade(st.bgTop, 0.99f));
     g.text("PAUSED", 30, fade(st.text, 0.96f), 640.f, 222.f, Gfx::Center,
            3.f, true);
-    ::ui::divider(g, st, 470.f, 268.f, 340.f, 0.18f);
+    {
+        char pb[96];
+        std::snprintf(pb, sizeof pb, "SCORE %07d  ·  %.2f%%  ·  COMBO %d",
+                      play.score, play.accuracy() * 100.0, play.combo);
+        g.text(pb, 9, fade(st.dim, 0.7f), 640.f, 286.f, Gfx::Center, 1.8f,
+               false);
+    }
+    ::ui::divider(g, st, 470.f, 300.f, 340.f, 0.18f);
 
     const char *labels[3] = {"RESUME", "RESTART", "QUIT TO SONGS"};
     for (int i = 0; i < 3; ++i) {
         ::ui::button(g, st, layout::pauseButton(i), labels[i], pauseHover[i],
                    0.f, i == 0);
     }
-    g.text("ESC — RESUME", 9, fade(st.dim, 0.5f), 640.f, 532.f,
-           Gfx::Center, 2.f, false);
+    g.text("ESC — RESUME   ·   − / + — VOLUME", 9, fade(st.dim, 0.5f),
+           640.f, 532.f, Gfx::Center, 2.f, false);
 }
 
 void App::drawResults(Gfx &g) {
@@ -668,6 +716,13 @@ void App::drawResults(Gfx &g) {
     std::snprintf(buf, sizeof buf, "%07d", resScore);
     g.text(buf, 34, fade(st.text, 0.96f), 560.f, 210.f, Gfx::Left, 1.f, true);
 
+    if (resNewBest) {
+        Rect nb{756.f, 200.f, 104.f, 22.f};
+        g.fillRoundRect(nb, 11.f, 0.f, fade(st.accent, 0.9f));
+        g.text("NEW BEST", 8, fade(st.bgTop, 0.95f), nb.x + nb.w * 0.5f,
+               nb.y + 5.f, Gfx::Center, 2.4f, true);
+    }
+
     std::snprintf(buf, sizeof buf, "%.2f%%", resAcc * 100.0);
     g.text("ACCURACY", 9, fade(st.dim, 0.6f), 560.f, 274.f, Gfx::Left, 2.6f,
            false);
@@ -697,6 +752,59 @@ void App::drawResults(Gfx &g) {
            true);
     g.text(resDiff, 10, fade(st.dim, 0.65f), 560.f, 512.f, Gfx::Left, 1.4f,
            false);
+
+    // Личный рекорд по этой карте.
+    if (resBest.valid) {
+        std::snprintf(buf, sizeof buf, "BEST %07d  ·  %.2f%%  ·  %d PLAYS",
+                      resBest.score, resBest.acc * 100.0, resBest.plays);
+        g.text(buf, 9, fade(resNewBest ? st.accent : st.dim,
+                            resNewBest ? 0.95f : 0.6f),
+               560.f, 536.f, Gfx::Left, 1.4f, resNewBest);
+    }
+
+    // Разброс попаданий: наглядно видно, рано или поздно игрок жмёт.
+    bool hasTiming = false;
+    for (float d : resDeltas) {
+        if (std::fabs(d) < 1e8f) {
+            hasTiming = true;
+            break;
+        }
+    }
+    if (hasTiming) {
+        double p2 = 45, g2 = 95, ok2 = 160;
+        cfg.windows(p2, g2, ok2);
+        float axisY = 512.f;
+        float x0 = 90.f, x1 = 510.f, cxx = (x0 + x1) * 0.5f;
+        g.text("TIMING", 8, fade(st.dim, 0.6f), x0, 492.f, Gfx::Left, 2.4f,
+               false);
+        g.fillRect({x0, axisY, x1 - x0, 1.f}, fade(st.dim, 0.22f));
+        for (int i = -1; i <= 1; ++i) {
+            float x = cxx + float(i) * 110.f;
+            g.fillRect({x, axisY - 5.f, 1.f, 11.f},
+                       fade(st.dim, i == 0 ? 0.45f : 0.22f));
+        }
+        for (float d : resDeltas) {
+            if (std::fabs(d) >= 1e8f) {
+                continue;
+            }
+            float x = cxx + std::clamp(d / float(std::max(80.0, ok2)), -1.f,
+                                       1.f) *
+                              220.f;
+            g.fillRect({x, axisY - 4.f, 1.f, 8.f}, fade(st.accent, 0.42f));
+        }
+        float mx = cxx + std::clamp(resMeanDelta / float(std::max(80.0, ok2)),
+                                    -1.f, 1.f) *
+                              220.f;
+        g.fillRect({mx - 1.f, axisY - 9.f, 2.f, 19.f},
+                   fade(st.accent, 0.95f));
+        std::snprintf(buf, sizeof buf, "AVG %+.0f MS  %s", double(resMeanDelta),
+                      resMeanDelta < 0.f ? "EARLY" : "LATE");
+        g.text(buf, 8, fade(st.dim, 0.7f), x1, 492.f, Gfx::Right, 1.6f, false);
+        g.text("EARLY", 7, fade(st.dim, 0.5f), x0, axisY + 12.f, Gfx::Left,
+               1.6f, false);
+        g.text("LATE", 7, fade(st.dim, 0.5f), x1, axisY + 12.f, Gfx::Right,
+               1.6f, false);
+    }
 
     const char *labels[3] = {"RETRY", "SONGS", "MENU"};
     for (int i = 0; i < 3; ++i) {

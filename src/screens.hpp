@@ -14,7 +14,7 @@ Rect selectBack();
 Rect selectCover();
 
 // --- настройки -----------------------------------------------------------
-constexpr Rect kSetSide{64.f, 140.f, 232.f, 320.f};
+constexpr Rect kSetSide{64.f, 140.f, 232.f, 368.f};
 Rect settingsCat(int i);
 Rect settingsRow(int i);
 Rect settingsSlider(int row);

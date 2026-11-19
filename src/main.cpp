@@ -74,6 +74,7 @@ int main(int argc, char **argv) {
     bool shotsMode = false;
     bool selftestMode = false;
     bool autoplayMode = false;
+    bool listMode = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--shot") {
             shotMode = true;
@@ -85,6 +86,8 @@ int main(int argc, char **argv) {
             selftestMode = true;
         } else if (std::string(argv[i]) == "--autoplay") {
             autoplayMode = true;
+        } else if (std::string(argv[i]) == "--list") {
+            listMode = true;
         }
     }
 
@@ -197,12 +200,41 @@ int main(int argc, char **argv) {
         SDL_SetWindowFullscreen(win, true);
     }
 
+    if (listMode) {
+        app.db.scan();
+        app.resortMaps();
+        for (int sm = 0; sm < 5; ++sm) {
+            app.sortMode = sm;
+            app.resortMaps();
+            if (app.db.count() > 0) {
+                std::printf("sort %-6s -> %s / %s\n", app.sortName(),
+                            app.db.entries[0].title().c_str(),
+                            app.db.entries.back().title().c_str());
+            }
+        }
+        app.sortMode = 0;
+        app.resortMaps();
+        std::printf("maps: %d (sort %s)\n", app.db.count(), app.sortName());
+        for (int i = 0; i < app.db.count(); ++i) {
+            const mapdb::Entry &e = app.db.entries[size_t(i)];
+            const ScoreEntry *best = scores::get(e.id);
+            std::printf("%2d  %-28s  %-18s bpm=%.1f len=%.1fs custom=%d "
+                        "best=%d\n",
+                        i, e.title().c_str(), e.map.version.c_str(),
+                        e.map.bpm, e.lengthMs / 1000.0, int(e.custom),
+                        best ? best->score : 0);
+        }
+        cleanup();
+        return 0;
+    }
+
     if (autoplayMode) {
         if (app.db.count() == 0) {
             std::fprintf(stderr, "autoplay: no maps\n");
             cleanup();
             return 1;
         }
+        app.cfg.autoplay = true;
         app.startMap(0);
         if (app.screen != App::Screen::Play) {
             std::fprintf(stderr, "autoplay: start failed: %s\n",
@@ -210,7 +242,6 @@ int main(int argc, char **argv) {
             cleanup();
             return 1;
         }
-        size_t idx = 0;
         Uint64 prevA = SDL_GetTicks();
         Uint64 t0 = prevA;
         while (SDL_GetTicks() - t0 < 12000 && app.screen == App::Screen::Play) {
@@ -225,20 +256,6 @@ int main(int argc, char **argv) {
             prevA = nowA;
             app.update(dt);
 
-            if (app.audioStarted && app.screen == App::Screen::Play &&
-                !app.paused) {
-                while (idx < app.play.notes.size() && app.play.hit[idx] != 0) {
-                    ++idx;
-                }
-                if (idx < app.play.notes.size()) {
-                    const game::Spawn &n = app.play.notes[idx];
-                    double d = n.timeMs - (app.play.songMs - app.cfg.offsetMs);
-                    if (std::fabs(d) <= 42.0) {
-                        app.play.arcAngle = n.angle;
-                        game::press(app.play, n.key, app.cfg);
-                    }
-                }
-            }
             SDL_Delay(2);
         }
         // Проверяем, что ESC в паузе действительно снимает паузу.
@@ -250,13 +267,22 @@ int main(int argc, char **argv) {
         app.handleEvent(ev);
         bool pausedTwice = app.paused;
 
+        int scoreBeforeFinish = app.play.score;
+        double accBeforeFinish = app.play.accuracy();
+        double posBeforeFinish = song::positionMs();
+        app.finishMap(app.play.counts[game::kMiss] * 3 <
+                          app.play.totalNotes() &&
+                      accBeforeFinish > 0.55);
+
         std::printf("autoplay: audioStarted=%d pos=%.1f notes=%d "
-                    "counts=%d/%d/%d/%d score=%d acc=%.3f pause=%d/%d\n",
-                    int(app.audioStarted), song::positionMs(),
+                    "counts=%d/%d/%d/%d score=%d acc=%.3f pause=%d/%d "
+                    "best=%s/%d\n",
+                    int(app.audioStarted), posBeforeFinish,
                     app.play.totalNotes(), app.play.counts[0],
                     app.play.counts[1], app.play.counts[2],
-                    app.play.counts[3], app.play.score, app.play.accuracy(),
-                    int(pausedOnce), int(pausedTwice));
+                    app.play.counts[3], scoreBeforeFinish,
+                    accBeforeFinish, int(pausedOnce), int(pausedTwice),
+                    app.resNewBest ? "NEW" : "OLD", app.resBest.score);
         song::stop();
         cleanup();
         if (!pausedOnce || pausedTwice) {
@@ -318,6 +344,27 @@ int main(int argc, char **argv) {
         }
         std::printf("selftest play ok: notes=%d title=%s\n",
                     app.play.totalNotes(), app.play.title.c_str());
+
+        // Проверяем логику лучшего результата, не трогая scores.cfg.
+        int testCounts[4] = {6, 0, 0, 0};
+        ScoreEntry best, before;
+        bool newBest = scores::submit("selftest-entry", 123456, 1.0, 6,
+                                      testCounts, best, before);
+        const ScoreEntry *saved = scores::get("selftest-entry");
+        std::printf("selftest score: %d (expected 123456), new=%d\n",
+                    saved ? saved->score : 0, int(newBest));
+        if (!saved || saved->score != 123456 || !newBest) {
+            std::fprintf(stderr, "selftest: score submit failed\n");
+            cleanup();
+            return 1;
+        }
+
+        app.cfg.mapSnap = true;
+        app.play.bpm = 120.0;
+        app.play.offsetBeatMs = 0.0;
+        std::printf("selftest snap: 1010 -> %.0f (expected 1000)\n",
+                    app.snapTime(1010.0));
+
         song::stop();
         cleanup();
         return 0;
@@ -372,6 +419,11 @@ int main(int argc, char **argv) {
         app.mouseMoved(700.f, 330.f);
         warm(60);
         snap("settings");
+
+        app.setCat = 1;
+        app.setRow = 2;
+        warm(40);
+        snap("settings_play");
 
         // Создание карты.
         app.screen = App::Screen::Create;
@@ -461,6 +513,18 @@ int main(int argc, char **argv) {
         app.resCounts[1] = 40;
         app.resCounts[2] = 4;
         app.resCounts[3] = 8;
+        app.resNewBest = true;
+        app.resBest.valid = true;
+        app.resBest.score = 298420;
+        app.resBest.acc = 0.94;
+        app.resBest.plays = 4;
+        app.resDeltas.clear();
+        for (int i = 0; i < 160; ++i) {
+            float d = std::sin(float(i) * 2.17f) * 34.f + 7.f +
+                      float((i % 9) - 4) * 3.5f;
+            app.resDeltas.push_back(d);
+        }
+        app.resMeanDelta = 7.f;
         app.resTitle = app.db.count() > 0 ? app.db.entries[0].title() : "SONG";
         app.resDiff = app.db.count() > 0 ? app.db.entries[0].map.version : "DIFF";
         app.mouseMoved(560.f, 630.f);

@@ -3,6 +3,7 @@
 #include "audio.hpp"
 #include "paths.hpp"
 #include "screens.hpp"
+#include "scores.hpp"
 #include "settings_ui.hpp"
 #include "ui.hpp"
 #include "song.hpp"
@@ -44,7 +45,25 @@ std::string slug(const std::string &s) {
 bool App::init(Gfx &g) {
     gfx = &g;
     cfg.load(paths::settingsFile());
+    scores::load(paths::scoresFile());
     db.scan();
+    resortMaps();
+
+    // На старте показываем самую свежую карту из истории.
+    {
+        int recent = -1;
+        long long newest = 0;
+        for (int i = 0; i < db.count(); ++i) {
+            const ScoreEntry *e = scores::get(db.entries[size_t(i)].id);
+            if (e && e->valid && e->lastPlayed > newest) {
+                newest = e->lastPlayed;
+                recent = i;
+            }
+        }
+        if (recent >= 0) {
+            sel = recent;
+        }
+    }
 
     song::setMusicVolume(cfg.master * cfg.music);
     song::setSfxVolume(cfg.master * cfg.sfx);
@@ -265,19 +284,34 @@ void App::updateCreate(float dt) {
     game::aimAt(play, mouseX, mouseY);
     play.songMs = pos;
     play.offsetMs = 0.0;
+
+    // Метроном: короткий тик на каждой доле.
+    if (cfg.metronome && play.bpm > 1.0) {
+        double beat = 60000.0 / play.bpm;
+        long long idx =
+            (long long)std::floor((pos - play.offsetBeatMs) / beat);
+        if (idx != metroBeat) {
+            metroBeat = idx;
+            song::sfx(3);
+        }
+    }
     float k = 1.f - std::exp(-dt * 32.f);
     float d = play.targetAngle - play.arcAngle;
     d = std::atan2(std::sin(d), std::cos(d));
     play.arcAngle += d * k;
 
     if (pendingRec >= 0) {
-        if (pos - lastRecMs >= 150.0) {
+        double when = snapTime(pos);
+        double minGap = cfg.mapSnap
+                            ? std::max(90.0, 60000.0 / std::max(1.0, play.bpm) / 8.0)
+                            : 150.0;
+        if (when - lastRecMs >= minGap) {
             game::Spawn n;
-            n.timeMs = pos;
+            n.timeMs = when;
             n.angle = play.arcAngle;
             n.key = pendingRec;
             recorded.push_back(n);
-            lastRecMs = pos;
+            lastRecMs = when;
             recCount = 1.f;
             if (cfg.hitSound) {
                 song::sfx(pendingRec);
@@ -320,6 +354,27 @@ void App::updatePlay(float dt) {
     int missBefore = play.counts[game::kMiss];
     double pos = song::positionMs();
     game::update(play, pos, dt, cfg);
+
+    if (cfg.autoplay && !play.finished) {
+        for (size_t i = play.alive; i < play.notes.size(); ++i) {
+            if (play.hit[i] != 0) {
+                continue;
+            }
+            const game::Spawn &n = play.notes[i];
+            double d = (pos - double(cfg.offsetMs)) - n.timeMs;
+            if (d < -600.0) {
+                break;
+            }
+            if (std::fabs(d) <= 30.0) {
+                play.arcAngle = n.angle;
+                play.targetAngle = n.angle;
+                if (game::press(play, n.key, cfg) && cfg.hitSound) {
+                    song::sfx(n.key);
+                }
+            }
+            break;
+        }
+    }
 
     if (play.counts[game::kMiss] > missBefore && cfg.hitSound) {
         song::sfx(2);
@@ -388,7 +443,7 @@ void App::startMap(int index) {
     // Небольшой отсчёт перед стартом: у карт первая нота может быть
     // почти сразу (как в примере), и без него первый метеорит не поймать.
     audioStartMs = std::max(0.0, notes.front().timeMs - 1500.0);
-    leadLeft = 2.4f;
+    leadLeft = std::clamp(cfg.leadInSec, 0.5f, 6.f);
     audioStarted = false;
     double startMs = audioStartMs - double(leadLeft) * 1000.0;
     game::start(play, notes, startMs, e.map.bpm, e.map.offsetMs, cfg);
@@ -428,7 +483,126 @@ void App::finishMap(bool clear) {
     resTitle = play.title;
     resDiff = play.diff;
     resSel = 0;
+
+    // Лучший результат и статистика тайминга.
+    resNewBest = false;
+    resBest = ScoreEntry{};
+    if (playMap >= 0 && playMap < db.count()) {
+        const std::string &mapId = db.entries[size_t(playMap)].id;
+        bool complete = play.resolvedNotes() == play.totalNotes();
+        if (!cfg.autoplay && complete) {
+            ScoreEntry before;
+            resNewBest = scores::submit(mapId, play.score, play.accuracy(),
+                                        play.maxCombo, play.counts, resBest,
+                                        before);
+            scores::save(paths::scoresFile());
+        } else {
+            // Демо/недоигранный прогон: показываем прежний рекорд, но не пишем.
+            const ScoreEntry *prev = scores::get(mapId);
+            if (prev && prev->valid) {
+                resBest = *prev;
+            }
+        }
+    }
+    resDeltas = play.hitDelta;
+    double sum = 0.0;
+    int n = 0;
+    for (float d : resDeltas) {
+        if (std::fabs(d) < 1e8f) {
+            sum += double(d);
+            ++n;
+        }
+    }
+    resMeanDelta = (n > 0) ? float(sum / double(n)) : 0.f;
+
     go(Screen::Results);
+}
+
+const char *App::sortName() const {
+    static const char *names[5] = {"ARTIST", "TITLE", "BPM", "LENGTH",
+                                   "RECENT"};
+    return names[std::clamp(sortMode, 0, 4)];
+}
+
+void App::resortMaps() {
+    if (db.entries.empty()) {
+        sel = 0;
+        return;
+    }
+    int old = std::clamp(sel, 0, db.count() - 1);
+    std::string keep = db.entries[size_t(old)].sourcePath;
+
+    auto lower = [](std::string v) {
+        for (char &c : v) {
+            c = char(std::tolower(static_cast<unsigned char>(c)));
+        }
+        return v;
+    };
+    auto byArtist = [&](const mapdb::Entry &a, const mapdb::Entry &b) {
+        std::string aa = lower(a.artist());
+        std::string bb = lower(b.artist());
+        if (aa != bb) {
+            return aa < bb;
+        }
+        return lower(a.title()) < lower(b.title());
+    };
+
+    switch (sortMode) {
+    case 1:
+        std::stable_sort(db.entries.begin(), db.entries.end(),
+                         [&](const mapdb::Entry &a, const mapdb::Entry &b) {
+                             std::string aa = lower(a.title());
+                             std::string bb = lower(b.title());
+                             if (aa != bb) {
+                                 return aa < bb;
+                             }
+                             return byArtist(a, b);
+                         });
+        break;
+    case 2:
+        std::stable_sort(db.entries.begin(), db.entries.end(),
+                         [&](const mapdb::Entry &a, const mapdb::Entry &b) {
+                             if (a.map.bpm != b.map.bpm) {
+                                 return a.map.bpm < b.map.bpm;
+                             }
+                             return byArtist(a, b);
+                         });
+        break;
+    case 3:
+        std::stable_sort(db.entries.begin(), db.entries.end(),
+                         [&](const mapdb::Entry &a, const mapdb::Entry &b) {
+                             if (a.lengthMs != b.lengthMs) {
+                                 return a.lengthMs < b.lengthMs;
+                             }
+                             return byArtist(a, b);
+                         });
+        break;
+    case 4:
+        std::stable_sort(db.entries.begin(), db.entries.end(),
+                         [&](const mapdb::Entry &a, const mapdb::Entry &b) {
+                             const ScoreEntry *sa = scores::get(a.id);
+                             const ScoreEntry *sb = scores::get(b.id);
+                             long long ta = (sa && sa->valid) ? sa->lastPlayed : 0;
+                             long long tb = (sb && sb->valid) ? sb->lastPlayed : 0;
+                             if (ta != tb) {
+                                 return ta > tb;
+                             }
+                             return byArtist(a, b);
+                         });
+        break;
+    default:
+        std::stable_sort(db.entries.begin(), db.entries.end(), byArtist);
+        break;
+    }
+
+    sel = 0;
+    for (int i = 0; i < db.count(); ++i) {
+        if (db.entries[size_t(i)].sourcePath == keep) {
+            sel = i;
+            break;
+        }
+    }
+    sel = std::clamp(sel, 0, db.count() - 1);
 }
 
 void App::loadCoverFor(int index) {
@@ -452,6 +626,19 @@ void App::loadCoverFor(int index) {
     if (gfx) {
         db.ensureCover(e, *gfx);
     }
+}
+
+double App::snapTime(double pos) const {
+    if (!cfg.mapSnap || play.bpm <= 1.0) {
+        return pos;
+    }
+    double div = 60000.0 / play.bpm / 4.0; // 1/16 ноты
+    double base = play.offsetBeatMs;
+    double snapped = base + std::round((pos - base) / div) * div;
+    if (std::fabs(snapped - pos) <= 120.0) {
+        return snapped;
+    }
+    return pos;
 }
 
 void App::saveCustom() {
@@ -537,6 +724,23 @@ void App::saveCustom() {
     recorded.clear();
     song::stop();
     db.scan();
+    resortMaps();
+
+    // На старте показываем самую свежую карту из истории.
+    {
+        int recent = -1;
+        long long newest = 0;
+        for (int i = 0; i < db.count(); ++i) {
+            const ScoreEntry *e = scores::get(db.entries[size_t(i)].id);
+            if (e && e->valid && e->lastPlayed > newest) {
+                newest = e->lastPlayed;
+                recent = i;
+            }
+        }
+        if (recent >= 0) {
+            sel = recent;
+        }
+    }
     for (int i = 0; i < db.count(); ++i) {
         if (db.entries[i].custom &&
             fs::path(db.entries[i].sourcePath).parent_path() ==
@@ -718,6 +922,7 @@ void App::clickCreate(float x, float y) {
         recCount = 0.f;
         lastRecMs = -1000.0;
         pendingRec = -1;
+        metroBeat = 0;
         creating = true;
         nameEdit = false;
         frozenWorld = std::clamp(int(std::lround(ui.styleT)), 0, 2);
@@ -761,12 +966,20 @@ void App::keySelect(int sc, bool repeat) {
         openCreate();
     } else if (sc == SDL_SCANCODE_R) {
         db.scan();
-        sel = 0;
+        resortMaps();
         if (db.count() > 0) {
-            loadCoverFor(0);
+            loadCoverFor(sel);
         }
         errorText = "MAPS RESCANNED: " + std::to_string(db.count());
         errorT = 2.5f;
+    } else if (sc == SDL_SCANCODE_S) {
+        sortMode = (sortMode + 1) % 5;
+        resortMaps();
+        if (db.count() > 0) {
+            loadCoverFor(sel);
+        }
+        errorText = std::string("SORT: ") + sortName();
+        errorT = 1.6f;
     }
 }
 
@@ -803,6 +1016,18 @@ void App::keyCreate(int sc, bool repeat) {
     if (creating) {
         if (sc == SDL_SCANCODE_ESCAPE) {
             saveCustom();
+        } else if (sc == SDL_SCANCODE_BACKSPACE) {
+            if (!recorded.empty()) {
+                recorded.pop_back();
+                lastRecMs = recorded.empty() ? -1000.0
+                                             : recorded.back().timeMs;
+            }
+        } else if (sc == SDL_SCANCODE_G) {
+            cfg.mapSnap = !cfg.mapSnap;
+            cfg.save(paths::settingsFile());
+        } else if (sc == SDL_SCANCODE_M) {
+            cfg.metronome = !cfg.metronome;
+            cfg.save(paths::settingsFile());
         }
         return;
     }
@@ -851,6 +1076,10 @@ void App::keyPlay(int sc) {
             song::pause();
         }
         pauseSel = 0;
+        return;
+    }
+    if (sc == SDL_SCANCODE_R) {
+        retryMap();
         return;
     }
     int k0 = 0, k1 = 0;
@@ -983,6 +1212,31 @@ void App::handleEvent(const SDL_Event &e) {
     case SDL_EVENT_KEY_DOWN: {
         bool rep = e.key.repeat;
         int sc = int(e.key.scancode);
+
+        if (sc == SDL_SCANCODE_F11 && !rep) {
+            cfg.fullscreen = !cfg.fullscreen;
+            wantFullscreenApply = true;
+            cfg.save(paths::settingsFile());
+            break;
+        }
+        bool editingName = (screen == Screen::Create && nameEdit && !creating);
+        if (!editingName &&
+            (sc == SDL_SCANCODE_MINUS || sc == SDL_SCANCODE_KP_MINUS ||
+             sc == SDL_SCANCODE_EQUALS || sc == SDL_SCANCODE_KP_PLUS)) {
+            bool plus = (sc == SDL_SCANCODE_EQUALS ||
+                         sc == SDL_SCANCODE_KP_PLUS);
+            cfg.master = std::clamp(cfg.master + (plus ? 0.05f : -0.05f),
+                                    0.f, 1.f);
+            cfg.save(paths::settingsFile());
+            errorText = "VOLUME " +
+                        std::to_string(int(cfg.master * 100.f + 0.5f)) + "%";
+            errorT = 1.2f;
+            break;
+        }
+        if (rep) {
+            break;
+        }
+
         switch (screen) {
         case Screen::Menu: {
             int n = menu::buttonCount();
@@ -1085,8 +1339,15 @@ void App::handleEvent(const SDL_Event &e) {
                     creating = false;
                 }
                 db.scan();
+                resortMaps();
                 sel = 0;
-                loadCoverFor(0);
+                for (int i = 0; i < db.count(); ++i) {
+                    if (db.entries[size_t(i)].sourcePath == dst.string()) {
+                        sel = i;
+                        break;
+                    }
+                }
+                loadCoverFor(sel);
                 errorText = "IMPORTED: " +
                             std::filesystem::path(path).filename().string();
                 errorT = 3.f;

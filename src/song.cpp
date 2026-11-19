@@ -21,7 +21,7 @@ constexpr double kFramesPerMs = double(kRate) / 1000.0; // 48
 constexpr double kMsPerFrame = 1000.0 / double(kRate);  // 1/48
 constexpr float kTau = 6.28318530718f;
 constexpr int kFadeFrames = 240; // 5 мс мягкого старта после seek/resume
-constexpr int kSfxVoices = 3;
+constexpr int kSfxVoices = 4;
 
 // ---------------------------------------------------------------------------
 // Общее состояние. Аудио-поток читает его без блокировок, изменения
@@ -109,13 +109,16 @@ void startVoice(int kind) {
     v.active = true;
     v.noise = kind == 2;
     v.phase = 0.f;
-    v.phaseInc = (kind == 0 ? 880.f : 1320.f) * kTau / float(kRate);
+    v.phaseInc = (kind == 0 ? 880.f
+                            : (kind == 1 ? 1320.f : (kind == 3 ? 1760.f : 220.f))) *
+                 kTau / float(kRate);
     v.env = 1.f;
     // Затухание: слышимая длительность около 100 мс.
-    const float tau = kind == 2 ? 0.045f : 0.028f;
+    const float tau = kind == 2 ? 0.045f : (kind == 3 ? 0.018f : 0.028f);
     v.decay = std::exp(-1.f / (float(kRate) * tau));
     v.age = 0;
-    v.amp = kind == 0 ? 0.5f : (kind == 1 ? 0.44f : 0.42f);
+    v.amp = kind == 0 ? 0.5f
+                      : (kind == 1 ? 0.44f : (kind == 3 ? 0.22f : 0.42f));
     v.lp = 0.f;
 }
 

@@ -8,6 +8,8 @@ struct Settings {
     // --- игра -------------------------------------------------------------
     int timing = 1;          // 0 relaxed, 1 normal, 2 strict
     float approachSec = 1.35f; // сколько метеорит летит до кольца
+    float leadInSec = 2.4f;  // отсчёт перед стартом карты
+    bool autoplay = false;   // демо-режим: игра играет сама
     int offsetMs = 0;        // калибровка: + значит «ноты позже»
     float bgDim = 0.55f;     // затемнение фона карты
     bool hitSound = true;
@@ -29,6 +31,10 @@ struct Settings {
 
     // --- видео ------------------------------------------------------------
     bool fullscreen = false;
+
+    // --- создание карт ----------------------------------------------------
+    bool mapSnap = true;     // привязка нот к сетке 1/4
+    bool metronome = false;  // щелчок на каждую долю при записи
 
     void load(const std::string &path);
     void save(const std::string &path) const;

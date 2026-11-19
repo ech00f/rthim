@@ -61,4 +61,8 @@ std::string settingsFile() {
     return (std::filesystem::path(g_root) / "settings.cfg").string();
 }
 
+std::string scoresFile() {
+    return (std::filesystem::path(g_root) / "scores.cfg").string();
+}
+
 } // namespace paths

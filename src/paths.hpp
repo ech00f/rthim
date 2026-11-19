@@ -13,5 +13,6 @@ std::string songs();
 std::string customSongs();
 std::string cache();
 std::string settingsFile();
+std::string scoresFile();
 
 } // namespace paths

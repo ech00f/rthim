@@ -108,17 +108,25 @@ void DB::scan() {
         }
     }
 
-    // Самодельные карты: songs/custom/<папка>/<файл>.osu
-    if (fs::is_directory(paths::customSongs(), ec)) {
-        for (const fs::directory_entry &de :
-             fs::recursive_directory_iterator(paths::customSongs(), ec)) {
+    // Распакованные карты: любой .osu внутри songs/ (включая custom/).
+    // Так можно просто распаковать .osz в папку — игра её увидит.
+    const std::string customPrefix = paths::customSongs();
+    if (fs::is_directory(paths::songs(), ec)) {
+        for (fs::recursive_directory_iterator it(paths::songs(), ec), end;
+             it != end; it.increment(ec)) {
+            if (ec) {
+                break;
+            }
+            const fs::directory_entry &de = *it;
             if (!de.is_regular_file(ec) || lowerExt(de.path()) != ".osu") {
                 continue;
             }
+            std::string p = de.path().string();
+            bool isCustom = p.rfind(customPrefix, 0) == 0;
             beatmap::Map m;
             std::string err;
-            if (beatmap::loadOsu(de.path().string(), m, err)) {
-                addMap(m, de.path().string(), true);
+            if (beatmap::loadOsu(p, m, err)) {
+                addMap(m, p, isCustom);
             } else {
                 std::fprintf(stderr, "map %s: %s\n",
                              de.path().filename().string().c_str(),

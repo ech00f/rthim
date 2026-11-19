@@ -452,6 +452,51 @@ void draw(Gfx &g, const Style &st, State &s, const Settings &cfg) {
     g.fillRect({64.f, 92.f, W - 128.f, 2.f}, fade(st.text, 0.10f));
     g.fillRect({64.f, 92.f, (W - 128.f) * prog, 2.f}, fade(st.accent, 0.75f));
 
+    // Калибровочная шкала: последнее попадание и средний сдвиг.
+    {
+        float y = 114.f, halfW = 150.f;
+        double mean = 0.0;
+        int cnt = 0;
+        for (float d : s.hitDelta) {
+            if (std::fabs(d) < 1e8f) {
+                mean += d;
+                ++cnt;
+            }
+        }
+        if (cnt > 0) {
+            mean /= cnt;
+        }
+        g.fillRect({CX - halfW, y, halfW * 2.f, 1.f}, fade(st.text, 0.13f));
+        for (int k2 = -1; k2 <= 1; ++k2) {
+            float x = CX + float(k2) * halfW;
+            g.fillRect({x, y - 3.f, 1.f, 7.f},
+                       fade(st.text, k2 == 0 ? 0.35f : 0.18f));
+        }
+        if (s.lastJudge >= 0 && s.lastJudge != kMiss) {
+            float t = float(std::clamp(s.lastDelta / ok, -1.0, 1.0));
+            float x = CX + t * halfW;
+            g.fillRect({x - 1.f, y - 6.f, 2.f, 13.f},
+                       fade(judgeColor(st, s.lastJudge), 0.9f));
+        }
+        if (cnt > 0) {
+            float x = CX + float(std::clamp(mean / ok, -1.0, 1.0)) * halfW;
+            g.fillRect({x, y - 9.f, 1.f, 19.f}, fade(st.accent2, 0.7f));
+            std::snprintf(buf, sizeof buf, "AVG %+.0f MS", mean);
+            g.text(buf, 8, fade(st.dim, 0.55f), CX, y + 7.f, Gfx::Center,
+                   1.8f, false);
+        }
+        g.text("EARLY", 7, fade(st.dim, 0.32f), CX - halfW, y + 7.f,
+               Gfx::Left, 1.6f, false);
+        g.text("LATE", 7, fade(st.dim, 0.32f), CX + halfW, y + 7.f,
+               Gfx::Right, 1.6f, false);
+    }
+
+    if (cfg.autoplay) {
+        float pulse = 0.6f + 0.4f * std::sin(float(s.songMs) * 0.004f);
+        g.text("AUTOPLAY", 8, fade(st.accent2, pulse * 0.9f), CX, 66.f,
+               Gfx::Center, 3.2f, true);
+    }
+
     // Комбо.
     if (s.combo > 1) {
         std::snprintf(buf, sizeof buf, "%d", s.combo);
@@ -520,8 +565,8 @@ void draw(Gfx &g, const Style &st, State &s, const Settings &cfg) {
                1.f, true);
     }
 
-    g.text("ROTATE THE RING · HIT WITH YOUR KEY", 9,
-           fade(st.dim, 0.42f), CX, H - 22.f, Gfx::Center, 2.2f, false);
+    g.text("ESC — PAUSE · R — RESTART · ROTATE THE RING · HIT WITH YOUR KEY",
+           9, fade(st.dim, 0.42f), CX, H - 22.f, Gfx::Center, 2.f, false);
 }
 
 } // namespace game

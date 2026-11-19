@@ -67,6 +67,10 @@ void Settings::load(const std::string &path) {
             timing = std::clamp(readInt(v, timing), 0, 2);
         } else if (k == "approach") {
             approachSec = std::clamp(readFloat(v, approachSec), 0.7f, 2.4f);
+        } else if (k == "leadin") {
+            leadInSec = std::clamp(readFloat(v, leadInSec), 0.5f, 6.f);
+        } else if (k == "autoplay") {
+            autoplay = readBool(v, autoplay) != 0;
         } else if (k == "offset") {
             offsetMs = std::clamp(readInt(v, offsetMs), -250, 250);
         } else if (k == "bgdim") {
@@ -93,6 +97,10 @@ void Settings::load(const std::string &path) {
             keyPreset = std::clamp(readInt(v, keyPreset), 0, 3);
         } else if (k == "fullscreen") {
             fullscreen = readBool(v, fullscreen) != 0;
+        } else if (k == "mapsnap") {
+            mapSnap = readBool(v, mapSnap) != 0;
+        } else if (k == "metronome") {
+            metronome = readBool(v, metronome) != 0;
         }
     }
 }
@@ -105,6 +113,8 @@ void Settings::save(const std::string &path) const {
     f << "# rthim settings\n";
     f << "timing=" << timing << "\n";
     f << "approach=" << approachSec << "\n";
+    f << "leadin=" << leadInSec << "\n";
+    f << "autoplay=" << (autoplay ? 1 : 0) << "\n";
     f << "offset=" << offsetMs << "\n";
     f << "bgdim=" << bgDim << "\n";
     f << "hitsound=" << (hitSound ? 1 : 0) << "\n";
@@ -118,6 +128,8 @@ void Settings::save(const std::string &path) const {
     f << "autospeed=" << autoSpeed << "\n";
     f << "keypreset=" << keyPreset << "\n";
     f << "fullscreen=" << (fullscreen ? 1 : 0) << "\n";
+    f << "mapsnap=" << (mapSnap ? 1 : 0) << "\n";
+    f << "metronome=" << (metronome ? 1 : 0) << "\n";
 }
 
 void Settings::windows(double &perfect, double &good, double &ok) const {
