@@ -108,8 +108,11 @@ inline void guardContrast(Style &s) {
     if (std::fabs(luminance(s.text) - bg) < 0.33f) {
         s.text = (bg < 0.5f) ? hex(0xFFFFFF) : hex(0x141014);
     }
-    if (std::fabs(luminance(s.btnText) - bg) < 0.30f) {
-        s.btnText = (bg < 0.5f) ? hex(0xFFFFFF) : hex(0x141014);
+    // Текст лежит на плашке, а не на фоне: сравниваем именно с заливкой.
+    // На стыке миров плашка серая — тогда уводим подпись в чёрный.
+    float lf = luminance(s.btnFill);
+    if (std::fabs(luminance(s.btnText) - lf) < 0.34f) {
+        s.btnText = (lf < 0.5f) ? hex(0xFFFFFF) : hex(0x141014);
     }
     if (std::fabs(luminance(s.dim) - bg) < 0.16f) {
         s.dim = (bg < 0.5f) ? hex(0xC6B8D6) : hex(0x6E6860);

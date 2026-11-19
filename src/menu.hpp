@@ -23,10 +23,14 @@ struct State {
     float intro = 0.f;
 
     int selected = 0;
+    int prevSelected = 0;
     float hover[4] = {};
     float press[4] = {};
     float indicatorY = 0.f;
     float indicatorV = 0.f;
+
+    // Всплеск иконки в «медальоне» при смене пункта.
+    float iconT = 10.f;
 
     float rippleT = 2.f; // >= 1 — эффект неактивен
     float rippleX = 0.f, rippleY = 0.f;

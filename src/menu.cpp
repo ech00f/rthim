@@ -231,12 +231,10 @@ void backdrop(Gfx &g, const Style &st, const float w[3], const State &s) {
             g.ellipse(x, y, rx, rx * 0.55f, rot, fade(c, al), 16);
         }
 
-        g.ring(1050.f + px * -40.f, 560.f + py * -30.f, 190.f, 1.5f,
-               fade(st.accent, 0.18f * a));
-        g.ring(1050.f + px * -40.f, 560.f + py * -30.f, 240.f, 1.f,
-               fade(st.accent, 0.08f * a));
         g.ring(240.f + px * -30.f, 210.f + py * -20.f, 90.f, 1.2f,
                fade(st.accent2, 0.16f * a));
+        g.ring(1180.f + px * -20.f, 130.f + py * -20.f, 70.f, 1.f,
+               fade(st.accent2, 0.12f * a));
     }
 
     // ---- INK: полутон, пыль, красное кольцо, рамка ------------------------
@@ -264,13 +262,6 @@ void backdrop(Gfx &g, const Style &st, const float w[3], const State &s) {
             float x = 860.f + float(i) * 46.f;
             g.line(x, -20.f, x - 190.f, 210.f, 22.f, fade(st.text, 0.04f * a));
         }
-
-        float cx = 1090.f + px * -50.f, cy = 552.f + py * -30.f;
-        g.ring(cx, cy, 150.f, 2.f, fade(st.accent2, 0.55f * a));
-        float ang = time * 0.35f;
-        g.circle(cx + std::cos(ang) * 150.f, cy + std::sin(ang) * 150.f, 5.f,
-                 fade(st.accent2, 0.9f * a), 16);
-        g.circle(cx, cy, 3.f, fade(st.accent2, 0.7f * a), 12);
 
         Color frame = fade(st.text, 0.45f * a);
         g.line(16.f, 16.f, W - 16.f, 16.f, 1.2f, frame);
@@ -470,6 +461,199 @@ void button(Gfx &g, const Style &st, const State &s, int i, float peak) {
     g.line(ax + 6.f, cy, ax, cy + 5.f, 1.6f, arrow);
 }
 
+// Левая колонка: «сигнал» — псевдо-эквалайзер, который дышит в такт.
+void equalizer(Gfx &g, const Style &st, const State &s) {
+    float a = clamp01((s.intro - 0.30f) / 0.6f);
+    if (a <= 0.002f) {
+        return;
+    }
+    constexpr float x0 = 72.f;
+    constexpr float base = 530.f;
+    constexpr float bw = 20.f;
+    constexpr float gap = 12.f;
+    constexpr float maxH = 200.f;
+    constexpr int n = 7;
+
+    g.text("SIGNAL", 10, fade(st.dim, 0.7f * a), x0, 226.f, Gfx::Left, 3.f,
+           false);
+    g.text("STEREO", 9, fade(st.dim, 0.35f * a), x0, 242.f, Gfx::Left, 3.f,
+           false);
+
+    float beat = std::pow(std::max(0.f, std::sin(s.time * 6.28318f * 2.f)), 6.f);
+    float trackW = float(n) * (bw + gap) - gap;
+
+    g.fillRect({x0, base - maxH, trackW, 1.f}, fade(st.text, 0.06f * a));
+    g.fillRect({x0, base + 1.f, trackW, 1.f}, fade(st.text, 0.14f * a));
+
+    for (int i = 0; i < n; ++i) {
+        float ph = float(i) * 0.9f;
+        float wave = 0.5f + 0.5f * std::sin(s.time * 2.4f + ph);
+        float wave2 = 0.5f + 0.5f * std::sin(s.time * 4.1f + ph * 1.7f);
+        float shape = 0.30f + 0.40f * wave + 0.22f * wave2;
+        float h = std::min(maxH, 24.f + maxH * shape * (1.f + 0.18f * beat));
+        float x = x0 + float(i) * (bw + gap);
+        float r = st.radiusFactor * bw * 0.5f;
+        Color c = (i % 2 == 0) ? st.accent : st.accent2;
+
+        g.fillRoundRect({x, base - maxH, bw, maxH}, r, 0.f,
+                        fade(st.text, 0.05f * a));
+        if (st.hardShadow > 0.2f) {
+            float sh = st.hardShadow * 0.5f;
+            g.fillRoundRect({x + sh, base - h + sh, bw, h}, r, 0.f,
+                            fade(hex(0x000000), 0.85f * a));
+        }
+        g.fillRoundRect({x, base - h, bw, h}, r, 0.f,
+                        fade(c, (0.55f + 0.30f * wave) * a));
+        if (st.glow > 0.05f) {
+            g.glowCircle(x + bw * 0.5f, base - h * 0.5f, 20.f, c,
+                         0.09f * st.glow * a);
+        }
+    }
+
+    float by = base + 24.f;
+    float pulse = 0.6f + 0.4f * std::sin(s.time * 6.28318f * 2.f);
+    g.glowCircle(x0 + 3.f, by + 7.f, 11.f, st.accent, 0.30f * a * pulse);
+    g.circle(x0 + 3.f, by + 7.f, 3.f, fade(st.accent, a * pulse), 16);
+    g.text("120 BPM", 11, fade(st.dim, 0.8f * a), x0 + 15.f, by,
+           Gfx::Left, 2.f, true);
+    g.text("4 / 4", 10, fade(st.dim, 0.4f * a), x0 + trackW, by + 1.f,
+           Gfx::Right, 2.f, false);
+}
+
+// Правая колонка: медальон текущего мира и выбранного действия.
+void hero(Gfx &g, const Style &st, const float w[3], const State &s) {
+    float a = clamp01((s.intro - 0.35f) / 0.6f);
+    if (a <= 0.002f) {
+        return;
+    }
+    constexpr float cx = 1055.f;
+    constexpr float cy = 408.f;
+    constexpr float R = 104.f;
+    float beat = std::pow(std::max(0.f, std::sin(s.time * 6.28318f * 2.f)), 8.f);
+
+    g.text("CURRENT WORLD", 10, fade(st.dim, 0.7f * a), cx, 226.f,
+           Gfx::Center, 3.f, false);
+    int active = std::clamp(int(std::round(s.styleT)), 0, 2);
+    g.text(kNames[active], 22, fade(st.accent, a), cx, 242.f, Gfx::Center,
+           2.f, true);
+
+    // Орбита с делениями и вращающимися дугами.
+    g.ring(cx, cy, R + 24.f, 1.f, fade(st.dim, 0.16f * a));
+    for (int i = 0; i < 48; ++i) {
+        float ang = 6.28318f * float(i) / 48.f + s.time * 0.06f;
+        float r0 = R + 16.f;
+        float r1 = r0 + ((i % 4 == 0) ? 7.f : 3.f);
+        g.line(cx + std::cos(ang) * r0, cy + std::sin(ang) * r0,
+               cx + std::cos(ang) * r1, cy + std::sin(ang) * r1, 1.f,
+               fade(st.dim, ((i % 4 == 0) ? 0.35f : 0.14f) * a));
+    }
+    for (int k = 0; k < 3; ++k) {
+        float base = s.time * (0.32f - 0.07f * float(k)) + float(k) * 2.4f;
+        float span = 0.85f - 0.16f * float(k);
+        g.arc(cx, cy, R + 6.f - float(k) * 9.f, 2.f, base, base + span,
+              fade(st.accent, (0.50f - 0.12f * float(k)) * a), 40);
+    }
+
+    float discR = R - 10.f + beat * 2.f;
+
+    // Свечение/тень под диском.
+    if (w[0] > 0.01f) {
+        g.glowCircle(cx, cy, R * 1.3f, st.accent,
+                     (0.14f + 0.10f * beat) * w[0] * a);
+    }
+    if (w[1] > 0.01f) {
+        g.glowCircle(cx, cy, R * 1.15f, st.accent,
+                     (0.09f + 0.06f * beat) * w[1] * a);
+    }
+    if (w[2] > 0.01f) {
+        g.circle(cx + 9.f, cy + 9.f, discR,
+                 fade(hex(0x000000), 0.85f * w[2] * a), 64);
+    }
+
+    Color disc = mix(st.btnFill, st.bgBottom, 0.15f);
+    if (w[2] > 0.01f) {
+        disc = mix(disc, hex(0xF6F3EB), 0.85f * w[2]);
+    }
+    g.circle(cx, cy, discR, fade(disc, a), 64);
+    if (st.borderWidth > 0.35f) {
+        g.ring(cx, cy, discR, st.borderWidth, fade(st.btnBorder, a));
+    }
+
+    // Внутренности диска — свои у каждого мира.
+    if (w[0] > 0.01f) {
+        for (int i = 0; i < 32; ++i) {
+            float ang = 6.28318f * float(i) / 32.f - s.time * 0.35f;
+            float r0 = discR * 0.40f;
+            float amp = 0.35f + 0.65f * std::fabs(
+                                         std::sin(float(i) * 2.1f + s.time * 2.6f));
+            float r1 = r0 + 10.f + discR * 0.34f * amp;
+            g.line(cx + std::cos(ang) * r0, cy + std::sin(ang) * r0,
+                   cx + std::cos(ang) * r1, cy + std::sin(ang) * r1, 2.f,
+                   fade((i % 2) ? st.accent2 : st.accent, 0.45f * w[0] * a));
+        }
+        g.ring(cx, cy, discR * 0.36f, 1.2f, fade(st.accent, 0.40f * w[0] * a));
+    }
+    if (w[1] > 0.01f) {
+        for (int i = 0; i < 3; ++i) {
+            g.ring(cx, cy, discR * (0.45f + 0.20f * float(i)), 1.6f,
+                   fade(st.accent2, 0.34f * w[1] * a));
+        }
+        for (int i = 0; i < 8; ++i) {
+            float ang = s.time * 0.25f + 6.28318f * float(i) / 8.f;
+            float rr = discR + 18.f + std::sin(s.time * 1.2f + float(i)) * 4.f;
+            g.ellipse(cx + std::cos(ang) * rr, cy + std::sin(ang) * rr, 9.f,
+                      4.4f, ang, fade(st.accent, 0.45f * w[1] * a), 18);
+        }
+    }
+    if (w[2] > 0.01f) {
+        std::vector<Pt> wedge;
+        wedge.push_back({cx, cy});
+        float baseAng = s.time * 0.18f;
+        for (int i = 0; i <= 24; ++i) {
+            float ang = baseAng + 1.10f * float(i) / 24.f;
+            wedge.push_back({cx + std::cos(ang) * discR,
+                             cy + std::sin(ang) * discR});
+        }
+        g.polygon(wedge, fade(st.accent2, 0.85f * w[2] * a));
+
+    }
+
+    if (w[2] > 0.01f) {
+        g.circle(cx, cy, 42.f, fade(hex(0xF6F3EB), 0.96f * w[2] * a), 40);
+        g.ring(cx, cy, 42.f, 2.f, fade(hex(0x15130F), 0.9f * w[2] * a));
+    }
+
+    // Большая иконка выбранного пункта.
+    float pop = 1.f + 0.14f * std::exp(-s.iconT * 9.f);
+    Color ic = st.accent;
+    if (std::fabs(luminance(ic) - luminance(disc)) < 0.22f) {
+        ic = st.text;
+    }
+    icon(g, kIcons[s.selected], cx, cy - 6.f, 2.6f * pop,
+         fade(ic, 0.95f * a));
+
+    // Точка на орбите.
+    float oa = s.time * 0.5f;
+    float ox = cx + std::cos(oa) * (R + 24.f);
+    float oy = cy + std::sin(oa) * (R + 24.f);
+    g.glowCircle(ox, oy, 16.f, st.accent, 0.25f * a);
+    g.circle(ox, oy, 3.f, fade(st.accent, a), 16);
+
+    // Показания под медальоном.
+    const char *statLabels[3] = {"TEMPO", "OFFSET", "SYNC"};
+    const char *statVals[3] = {"120", "+12 MS", "100%"};
+    for (int i = 0; i < 3; ++i) {
+        float x = cx + float(i - 1) * 92.f;
+        g.text(statLabels[i], 9, fade(st.dim, 0.6f * a), x, 566.f,
+               Gfx::Center, 2.f, false);
+        g.text(statVals[i], 16, fade(st.text, 0.9f * a), x, 580.f,
+               Gfx::Center, 1.f, true);
+        if (i < 2) {
+            g.fillRect({x + 54.f, 568.f, 1.f, 34.f}, fade(st.text, 0.08f * a));
+        }
+    }
+}
+
 void footer(Gfx &g, const Style &st, const State &s) {
     float a = clamp01((s.intro - 0.5f) / 0.6f);
     if (a <= 0.002f) {
@@ -492,14 +676,14 @@ void footer(Gfx &g, const Style &st, const State &s) {
                on ? 626.f : 628.f, Gfx::Center, 3.f, on);
     }
 
-    float kx = trackX + trackW * 0.5f * (s.styleT * 0.5f);
+    float kx = trackX + trackW * (s.styleT * 0.5f);
     float pulse = 0.7f + 0.3f * std::sin(s.time * 4.f);
     g.glowCircle(kx, trackY, 18.f, st.accent, 0.35f * a * pulse);
     g.circle(kx, trackY, 4.5f, fade(st.accent, a), 24);
 
-    g.text("RTHIM / 0.1 — PROTOTYPE", 10, fade(st.dim, 0.4f * a), 44.f,
+    g.text("RTHIM / 0.1 — PROTOTYPE", 10, fade(st.dim, 0.55f * a), 44.f,
            684.f, Gfx::Left, 2.f, false);
-    g.text("UP/DOWN ENTER · ESC QUIT", 10, fade(st.dim, 0.4f * a),
+    g.text("UP/DOWN ENTER · ESC QUIT", 10, fade(st.dim, 0.55f * a),
            W - 44.f, 684.f, Gfx::Right, 2.f, false);
 }
 
@@ -533,22 +717,25 @@ void cursorDraw(Gfx &g, const Style &st, const float w[3], const State &s) {
         hov = std::max(hov, s.hover[i]);
     }
     float k = 1.f + 0.35f * hov;
+    // На залитой акцентом кнопке курсор того же цвета исчезал бы —
+    // подмешиваем цвет текста, он всегда контрастен плашке.
+    Color cc = mix(st.accent, st.text, hov * 0.85f);
 
     g.glowCircle(s.trailX, s.trailY, 26.f * k, st.accent,
                  0.10f + 0.10f * hov);
 
     if (w[0] > 0.01f) {
-        Color c = fade(st.accent, 0.85f * w[0]);
+        Color c = fade(cc, 0.85f * w[0]);
         g.line(x - 15.f * k, y, x + 15.f * k, y, 1.3f, c);
         g.line(x, y - 15.f * k, x, y + 15.f * k, 1.3f, c);
-        g.ring(x, y, 9.f * k, 1.2f, fade(st.accent, 0.55f * w[0]));
+        g.ring(x, y, 9.f * k, 1.2f, fade(cc, 0.55f * w[0]));
     }
     if (w[1] > 0.01f) {
-        g.circle(x, y, 4.6f * k, fade(st.accent, w[1]), 24);
-        g.ring(x, y, 13.f * k, 1.2f, fade(st.accent, 0.35f * w[1]));
+        g.circle(x, y, 4.6f * k, fade(cc, w[1]), 24);
+        g.ring(x, y, 13.f * k, 1.2f, fade(cc, 0.35f * w[1]));
     }
     if (w[2] > 0.01f) {
-        Color c = fade(st.text, w[2]);
+        Color c = fade(cc, w[2]);
         float d = 8.f * k;
         g.line(x - d, y - d, x + d, y - d, 2.f, c);
         g.line(x + d, y - d, x + d, y + d, 2.f, c);
@@ -576,6 +763,11 @@ void update(State &s, float dt) {
     if (over >= 0) {
         s.selected = over;
     }
+    if (s.selected != s.prevSelected) {
+        s.prevSelected = s.selected;
+        s.iconT = 0.f;
+    }
+    s.iconT += dt;
 
     for (int i = 0; i < kCount; ++i) {
         float target = (i == s.selected) ? 1.f : 0.f;
@@ -604,6 +796,8 @@ void draw(Gfx &g, State &s) {
     styleWeights(s.styleT, w);
 
     backdrop(g, st, w, s);
+    equalizer(g, st, s);
+    hero(g, st, w, s);
     topBar(g, st, s);
     titleBlock(g, st, w, s);
     indicator(g, st, s);
